@@ -111,6 +111,9 @@ jobs:
       
       - name: Create and push tag
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
           NEW_TAG="${{ steps.next_version.outputs.new_tag }}"
           git tag -a "${NEW_TAG}" -m "Release ${NEW_TAG}"
           git push origin "${NEW_TAG}"
