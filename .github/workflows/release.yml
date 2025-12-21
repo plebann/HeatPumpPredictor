@@ -74,14 +74,14 @@ jobs:
       - name: Update manifest.json
         run: |
           NEW_VERSION="${{ steps.next_version.outputs.new_version }}"
-          sed -i "s/\"version\": \".*\"/\"version\": \"${NEW_VERSION}\"/" custom_components/energy_optimizer/manifest.json
+          sed -i "s/\"version\": \".*\"/\"version\": \"${NEW_VERSION}\"/" custom_components/heat_pump_predictor/manifest.json
           echo "Updated manifest.json to version ${NEW_VERSION}"
       
       - name: Commit version update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add custom_components/energy_optimizer/manifest.json
+          git add custom_components/heat_pump_predictor/manifest.json
           git commit -m "Bump version to ${{ steps.next_version.outputs.new_version }}"
           git push
       
@@ -94,7 +94,7 @@ jobs:
       - name: Create release archive
         run: |
           cd custom_components
-          zip -r ../energy_optimizer.zip energy_optimizer/
+          zip -r ../heat_pump_predictor.zip heat_pump_predictor/
           cd ..
       
       - name: Generate release notes
@@ -129,14 +129,14 @@ jobs:
             ${{ steps.release_notes.outputs.changelog }}
             
             ### Installation
-            1. Download `energy_optimizer.zip`
+            1. Download `heat_pump_predictor.zip`
             2. Extract to your Home Assistant `custom_components` directory
             3. Restart Home Assistant
             
             ### HACS Installation
             This integration is available through HACS as a custom repository.
           files: |
-            energy_optimizer.zip
+            heat_pump_predictor.zip
           draft: false
           prerelease: false
         env:
