@@ -1,0 +1,72 @@
+﻿"""Sensor platform for Heat Pump Predictor integration."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import logging
+from typing import Callable
+
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription, SensorStateClass
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .const import DOMAIN, MIN_TEMP, MAX_TEMP, TRANSLATION_KEY_ENERGY, TRANSLATION_KEY_AVG_POWER_RUNNING, TRANSLATION_KEY_AVG_POWER_OVERALL, TRANSLATION_KEY_DUTY_CYCLE
+from .coordinator import HeatPumpCoordinator
+from .data_manager import TemperatureBucketData
+
+_LOGGER = logging.getLogger(__name__)
+
+@dataclass
+class HeatPumpSensorEntityDescription(SensorEntityDescription):
+    value_fn: Callable[[TemperatureBucketData], float | None] = None
+    bucket_temp: int = 0
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+    coordinator: HeatPumpCoordinator = hass.data[DOMAIN][entry.entry_id]
+    entities = []
+    for temp in range(MIN_TEMP, MAX_TEMP + 1):
+        entities.extend([
+            HeatPumpSensor(coordinator, HeatPumpSensorEntityDescription(
+                key=f"total_energy_{temp}", translation_key=TRANSLATION_KEY_ENERGY, bucket_temp=temp,
+                device_class=SensorDeviceClass.ENERGY, native_unit_of_measurement="kWh",
+                state_class=SensorStateClass.TOTAL_INCREASING, entity_registry_enabled_default=False,
+                value_fn=lambda data: data.total_energy_kwh,
+            )),
+            HeatPumpSensor(coordinator, HeatPumpSensorEntityDescription(
+                key=f"avg_power_running_{temp}", translation_key=TRANSLATION_KEY_AVG_POWER_RUNNING, bucket_temp=temp,
+                device_class=SensorDeviceClass.POWER, native_unit_of_measurement="W",
+                state_class=SensorStateClass.MEASUREMENT, entity_registry_enabled_default=False,
+                value_fn=lambda data: data.average_power_when_running,
+            )),
+            HeatPumpSensor(coordinator, HeatPumpSensorEntityDescription(
+                key=f"avg_power_overall_{temp}", translation_key=TRANSLATION_KEY_AVG_POWER_OVERALL, bucket_temp=temp,
+                device_class=SensorDeviceClass.POWER, native_unit_of_measurement="W",
+                state_class=SensorStateClass.MEASUREMENT, entity_registry_enabled_default=False,
+                value_fn=lambda data: data.average_power_overall,
+            )),
+            HeatPumpSensor(coordinator, HeatPumpSensorEntityDescription(
+                key=f"duty_cycle_{temp}", translation_key=TRANSLATION_KEY_DUTY_CYCLE, bucket_temp=temp,
+                native_unit_of_measurement="%", state_class=SensorStateClass.MEASUREMENT,
+                entity_registry_enabled_default=False, value_fn=lambda data: data.duty_cycle_percent,
+            )),
+        ])
+    async_add_entities(entities)
+    _LOGGER.info("Created %d heat pump predictor sensors", len(entities))
+
+class HeatPumpSensor(CoordinatorEntity[HeatPumpCoordinator], SensorEntity):
+    _attr_has_entity_name = True
+    entity_description: HeatPumpSensorEntityDescription
+
+    def __init__(self, coordinator: HeatPumpCoordinator, description: HeatPumpSensorEntityDescription) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{description.key}"
+        self._attr_translation_placeholders = {"temperature": str(description.bucket_temp)}
+
+    @property
+    def native_value(self) -> float | None:
+        bucket = self.coordinator.data_manager.buckets.get(self.entity_description.bucket_temp)
+        if bucket and self.entity_description.value_fn:
+            return self.entity_description.value_fn(bucket)
+        return None

@@ -1,0 +1,1 @@
+{"entity":{"sensor":{"total_energy":{"name":"Total Energy at {temperature}°C"},"avg_power_running":{"name":"Average Power (Running) at {temperature}°C"},"avg_power_overall":{"name":"Average Power (Overall) at {temperature}°C"},"duty_cycle":{"name":"Duty Cycle at {temperature}°C"}}}}
