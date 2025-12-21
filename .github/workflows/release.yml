@@ -71,43 +71,19 @@ jobs:
           echo "::notice title=Release Version::Creating release v${{ steps.next_version.outputs.new_version }}"
           echo "RELEASE_VERSION=${{ steps.next_version.outputs.new_version }}" >> $GITHUB_ENV
       
-      - name: Update manifest.json and commit to main
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update manifest.json
         run: |
           NEW_VERSION="${{ steps.next_version.outputs.new_version }}"
-          
-          # Update manifest.json
           sed -i "s/\"version\": \".*\"/\"version\": \"${NEW_VERSION}\"/" custom_components/heat_pump_predictor/manifest.json
-          
-          # Get the current commit SHA
-          CURRENT_SHA=$(git rev-parse HEAD)
-          
-          # Read the updated manifest content
-          MANIFEST_CONTENT=$(cat custom_components/heat_pump_predictor/manifest.json | base64 -w 0)
-          
-          # Get the current file SHA from GitHub
-          FILE_SHA=$(curl -s -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/contents/custom_components/heat_pump_predictor/manifest.json" \
-            | jq -r '.sha')
-          
-          # Commit directly to main using GitHub API (bypasses branch protection for pushes)
-          curl -X PUT \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/contents/custom_components/heat_pump_predictor/manifest.json" \
-            -d "{
-              \"message\": \"Bump version to ${NEW_VERSION}\",
-              \"content\": \"${MANIFEST_CONTENT}\",
-              \"sha\": \"${FILE_SHA}\",
-              \"branch\": \"main\"
-            }"
-          
-          # Fetch the updated main branch
-          git fetch origin main
-          git reset --hard origin/main
-          
           echo "Updated manifest.json to version ${NEW_VERSION}"
+      
+      - name: Commit version update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add custom_components/heat_pump_predictor/manifest.json
+          git commit -m "Bump version to ${{ steps.next_version.outputs.new_version }}"
+          git push
       
       - name: Create and push tag
         run: |
