@@ -1,4 +1,4 @@
-﻿{
+{
   "domain": "heat_pump_predictor",
   "name": "Heat Pump Predictor",
   "codeowners": ["@plebann"],
