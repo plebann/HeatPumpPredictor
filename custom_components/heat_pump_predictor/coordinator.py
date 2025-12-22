@@ -6,6 +6,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, Event, callback
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -24,6 +25,15 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[int, TemperatureBucketData]
         self._running_entity = entry.data[CONF_RUNNING_SENSOR]
         self._temperature_entity = entry.data[CONF_TEMPERATURE_SENSOR]
         self._unsub_state_listener = None
+        
+        # Create device info
+        self.device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name="Heat Pump Predictor",
+            manufacturer="Heat Pump Predictor",
+            model="Analytics",
+            entry_type=None,
+        )
 
     async def _async_update_data(self) -> dict[int, TemperatureBucketData]:
         try:

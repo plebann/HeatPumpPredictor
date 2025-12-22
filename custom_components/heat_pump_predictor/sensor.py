@@ -63,6 +63,7 @@ class HeatPumpSensor(CoordinatorEntity[HeatPumpCoordinator], SensorEntity):
         self.entity_description = description
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{description.key}"
         self._attr_translation_placeholders = {"temperature": str(description.bucket_temp)}
+        self._attr_device_info = coordinator.device_info
 
     @property
     def native_value(self) -> float | None:
