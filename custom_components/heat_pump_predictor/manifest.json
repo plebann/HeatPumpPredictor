@@ -2,7 +2,11 @@
   "domain": "heat_pump_predictor",
   "name": "Heat Pump Predictor",
   "codeowners": ["@plebann"],
+  "config_flow": true,
   "documentation": "https://github.com/plebann/HeatPumpPredictor",
+  "integration_type": "helper",
+  "iot_class": "calculated",
   "issue_tracker": "https://github.com/plebann/HeatPumpPredictor/issues",
+  "requirements": [],
   "version": "0.0.10"
 }
