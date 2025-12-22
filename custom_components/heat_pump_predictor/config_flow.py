@@ -34,15 +34,15 @@ class HeatPumpPredictorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            # Check if already configured (must be outside try/except)
+            await self.async_set_unique_id(
+                f"{user_input[CONF_ENERGY_SENSOR]}_{user_input[CONF_TEMPERATURE_SENSOR]}"
+            )
+            self._abort_if_unique_id_configured()
+
             try:
                 # Validate entities exist
                 await self._validate_input(user_input)
-
-                # Check if already configured
-                await self.async_set_unique_id(
-                    f"{user_input[CONF_ENERGY_SENSOR]}_{user_input[CONF_TEMPERATURE_SENSOR]}"
-                )
-                self._abort_if_unique_id_configured()
 
                 return self.async_create_entry(
                     title="Heat Pump Predictor",
