@@ -91,6 +91,9 @@ class HeatPumpSensor(CoordinatorEntity[HeatPumpCoordinator], SensorEntity):
             self._attr_name = f"Overall power at {temp}°C"
         elif description.translation_key == TRANSLATION_KEY_DUTY_CYCLE:
             self._attr_name = f"Duty cycle at {temp}°C"
+        
+        # Enforce predictable entity_id
+        self.entity_id = f"sensor.heat_pump_predictor_{description.key}"
 
     @property
     def native_value(self) -> float | None:

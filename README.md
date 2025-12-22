@@ -289,10 +289,13 @@ type: custom:apexcharts-card
 header:
   title: Heat Pump Power by Temperature
   show: true
+graph_span: 1h
 apex_config:
   chart:
     height: 350
   xaxis:
+    type: numeric
+    decimalsInFloat: 0
     title:
       text: Temperature (°C)
   yaxis:
@@ -302,12 +305,18 @@ series:
   - entity: sensor.heat_pump_predictor_power_curve
     attribute: data
     type: line
+    curve: smooth
+    show:
+      legend_value: false
     name: Overall Power
     data_generator: |
       return entity.attributes.data.map(d => [d.temp, d.power_overall]);
   - entity: sensor.heat_pump_predictor_power_curve
     attribute: data
     type: line
+    curve: smooth
+    show:
+      legend_value: false
     name: Running Power
     data_generator: |
       return entity.attributes.data.map(d => [d.temp, d.power_running]);
