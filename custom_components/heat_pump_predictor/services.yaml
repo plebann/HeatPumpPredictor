@@ -1,0 +1,21 @@
+calculate_energy:
+  name: Calculate energy consumption
+  description: Calculate predicted energy consumption for a given temperature for 1 hour based on collected data.
+  fields:
+    temperature:
+      name: Temperature
+      description: Outdoor temperature in degrees Celsius
+      required: true
+      example: 5.0
+      selector:
+        number:
+          min: -25
+          max: 30
+          step: 0.1
+          unit_of_measurement: "°C"
+    config_entry_id:
+      name: Config Entry ID
+      description: Config entry to use (optional, auto-detects if only one exists)
+      required: false
+      selector:
+        text:

@@ -56,7 +56,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             HeatPumpSensor(coordinator, HeatPumpSensorEntityDescription(
                 key=f"duty_cycle_{temp}", translation_key=TRANSLATION_KEY_DUTY_CYCLE, bucket_temp=temp,
                 native_unit_of_measurement="%", state_class=SensorStateClass.MEASUREMENT,
-                entity_registry_enabled_default=False, value_fn=lambda data: data.duty_cycle_percent,
+                suggested_display_precision=2, entity_registry_enabled_default=False,
+                value_fn=lambda data: data.duty_cycle_percent,
             )),
         ])
     async_add_entities(entities)
@@ -77,9 +78,9 @@ class HeatPumpSensor(CoordinatorEntity[HeatPumpCoordinator], SensorEntity):
         if description.translation_key == TRANSLATION_KEY_ENERGY:
             self._attr_name = f"Energy at {temp}°C"
         elif description.translation_key == TRANSLATION_KEY_AVG_POWER_RUNNING:
-            self._attr_name = f"Average power (running) at {temp}°C"
+            self._attr_name = f"Running power at {temp}°C"
         elif description.translation_key == TRANSLATION_KEY_AVG_POWER_OVERALL:
-            self._attr_name = f"Average power (overall) at {temp}°C"
+            self._attr_name = f"Overall power at {temp}°C"
         elif description.translation_key == TRANSLATION_KEY_DUTY_CYCLE:
             self._attr_name = f"Duty cycle at {temp}°C"
 

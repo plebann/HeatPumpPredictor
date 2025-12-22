@@ -26,14 +26,47 @@
         "name": "Energy at {temperature}°C"
       },
       "avg_power_running": {
-        "name": "Average power (running) at {temperature}°C"
+        "name": "Running power at {temperature}°C"
       },
       "avg_power_overall": {
-        "name": "Average power (overall) at {temperature}°C"
+        "name": "Overall power at {temperature}°C"
       },
       "duty_cycle": {
         "name": "Duty cycle at {temperature}°C"
       }
+    }
+  },
+  "services": {
+    "calculate_energy": {
+      "name": "Calculate energy consumption",
+      "description": "Calculate predicted energy consumption for a given temperature for 1 hour.",
+      "fields": {
+        "temperature": {
+          "name": "Temperature",
+          "description": "Outdoor temperature in degrees Celsius"
+        },
+        "config_entry_id": {
+          "name": "Config Entry ID",
+          "description": "Config entry to use (optional if only one exists)"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "insufficient_data": {
+      "message": "No data available for temperature {temperature}°C (bucket {bucket}). Please wait for more data to be collected."
+    },
+    "no_data_for_approximation": {
+      "message": "No data available for temperature {temperature}°C and no data found in any bucket for approximation."
+    },
+    "invalid_config_entry": {
+      "message": "Config entry {config_entry} not found."
+    },
+    "integration_not_setup": {
+      "message": "Heat Pump Predictor integration is not set up."
+    },
+    "multiple_config_entries": {
+      "message": "Multiple config entries exist. Please specify config_entry_id."
     }
   }
 }

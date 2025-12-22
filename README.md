@@ -43,6 +43,62 @@ A Home Assistant custom integration that tracks heat pump performance across dif
    - **Temperature Sensor**: Outdoor temperature sensor (°C)
 5. Click **Submit**
 
+### Required Input Sensors
+
+The integration requires three sensors from your heat pump system:
+
+#### 1. Energy Sensor
+- **Type**: `sensor` with `device_class: energy`
+- **Unit**: kWh (kilowatt-hours)
+- **State Class**: Must be `total_increasing` (cumulative meter)
+- **Requirements**:
+  - Must be a monotonically increasing counter
+  - Should track **only** your heat pump's energy consumption
+  - Must have numeric state (not "unavailable" or "unknown")
+- **Examples**:
+  - `sensor.heat_pump_energy`
+  - `sensor.inverter_total_energy`
+  - Shelly EM energy counter
+  - Modbus energy register from heat pump
+- **How to get**: Install an energy monitoring device (Shelly EM, CT clamp meter, smart plug with energy monitoring) on your heat pump circuit, or use built-in energy reporting if your heat pump supports it.
+
+#### 2. Running Sensor
+- **Type**: `binary_sensor`
+- **States**: `on` (heat pump running) / `off` (heat pump idle)
+- **Requirements**:
+  - Must accurately reflect when the compressor is actively running
+  - Should update immediately when heat pump starts/stops
+  - Not just "system enabled" - must indicate actual operation
+- **Examples**:
+  - `binary_sensor.heat_pump_compressor`
+  - `binary_sensor.heat_pump_running`
+  - Current sensor threshold template (e.g., >1A = running)
+  - Heat pump's built-in status output
+- **How to get**: 
+  - Use a current sensor (CT clamp) with threshold (e.g., create template: `{{ states('sensor.heat_pump_current')|float > 1 }}`)
+  - Use heat pump's digital output if available
+  - Create template from power sensor: `{{ states('sensor.heat_pump_power')|float > 100 }}`
+  - Some smart plugs provide binary "running" state
+
+#### 3. Temperature Sensor
+- **Type**: `sensor` with `device_class: temperature`
+- **Unit**: °C (Celsius)
+- **Requirements**:
+  - Must measure **outdoor** temperature (not indoor)
+  - Should be placed where heat pump reads outdoor temp (near outdoor unit)
+  - Must have numeric state
+  - Should update at least every 5-10 minutes
+- **Examples**:
+  - `sensor.outdoor_temperature`
+  - Weather station sensor
+  - Heat pump's built-in outdoor temp sensor
+  - Smart thermometer near outdoor unit
+- **How to get**:
+  - Use weather integration (e.g., Met.no, OpenWeatherMap)
+  - Install outdoor temperature sensor (Zigbee, Z-Wave, ESPHome)
+  - Read from heat pump if it exposes outdoor temp via Modbus/API
+  - **Important**: Weather API temps may differ from your actual location - using a sensor near your heat pump gives more accurate results
+
 ## Usage
 
 After configuration, 224 sensors will be created (disabled by default):
@@ -58,6 +114,52 @@ Enable sensors for temperatures relevant to your climate. For example, if you ty
 - `sensor.heat_pump_predictor_avg_power_running_5`
 - `sensor.heat_pump_predictor_duty_cycle_10`
 
+## Sensor Types Explained
+
+The integration creates **4 sensor types** for each temperature bucket:
+
+### 1. Energy (kWh)
+- **What**: Total cumulative energy consumed when outdoor temperature was at this specific degree
+- **State Class**: `TOTAL_INCREASING` (compatible with Energy Dashboard)
+- **Example**: "Energy at 5°C" = 45.3 kWh
+- **Use**: Track how much total electricity your heat pump has consumed at each outdoor temperature over time. Helps identify which temperatures cost the most to heat.
+
+### 2. Running Power (W)
+- **What**: Average power consumption **while the heat pump was actively running** at this temperature
+- **State Class**: `MEASUREMENT`
+- **Example**: "Running power at 5°C" = 2500 W
+- **Use**: Shows how hard the heat pump works when it's actually on. Higher values at colder temps = heat pump works harder. This is the "intensity" when running.
+
+### 3. Overall Power (W)
+- **What**: Average power consumption **including both running and idle time** at this temperature
+- **State Class**: `MEASUREMENT`
+- **Example**: "Overall power at 5°C" = 1200 W (if duty cycle is 48%)
+- **Use**: Real-world average power draw. If duty cycle is 50% and running power is 2500W, overall is ~1250W. Better for calculating actual costs.
+
+### 4. Duty Cycle (%)
+- **What**: Percentage of time the heat pump was running vs. idle at this temperature
+- **State Class**: `MEASUREMENT`
+- **Precision**: 2 decimal places
+- **Example**: "Duty cycle at 5°C" = 48.35%
+- **Use**: Shows how often the heat pump needs to run. 100% = running constantly (undersized or very cold). 20% = cycles occasionally. Helps identify optimal operating temperatures.
+
+### Relationship Between Metrics
+
+```
+Overall Power ≈ Running Power × (Duty Cycle / 100)
+Energy = Power × Time at each temperature
+```
+
+### Practical Example
+
+At **-5°C**:
+- **Energy**: 12.5 kWh total consumed at this temperature
+- **Running Power**: 3200 W when compressor is on
+- **Overall Power**: 2560 W average (including idle)
+- **Duty Cycle**: 80% → heat pump runs 80% of the time
+
+**Interpretation**: At -5°C, your heat pump works hard (3200W) and barely stops (80% duty cycle), consuming significant energy. You could use this to predict costs for cold weather or decide if your system is sized correctly.
+
 ## How It Works
 
 ### Temperature Bucketing
@@ -70,6 +172,77 @@ Outdoor temperatures are bucketed using floor function:
 ### Previous-State Attribution
 
 Energy consumption is attributed to the temperature bucket where the heat pump **was operating**, not where it transitioned to. This ensures accurate performance tracking at each temperature.
+
+### Power Calculations
+
+The integration tracks three key metrics per temperature bucket:
+1. **`total_energy_kwh`** - Total energy consumed at this temperature
+2. **`total_time_seconds`** - Total time spent at this temperature
+3. **`running_time_seconds`** - Time heat pump was running at this temperature
+
+#### Running Power
+
+```
+Running Power = (total_energy_kwh × 1000) / (running_time_seconds / 3600)
+```
+
+**Example:**
+- Temperature: 5°C
+- Total energy consumed: 3.5 kWh
+- Running time: 2 hours (7200 seconds)
+
+```
+Running Power = (3.5 × 1000) / (7200 / 3600)
+              = 3500 / 2
+              = 1750 W
+```
+
+**Meaning**: When the heat pump was actually ON at 5°C, it consumed an average of 1750W.
+
+#### Overall Power
+
+```
+Overall Power = (total_energy_kwh × 1000) / (total_time_seconds / 3600)
+```
+
+**Example (same scenario):**
+- Temperature: 5°C
+- Total energy consumed: 3.5 kWh
+- **Total time at 5°C**: 5 hours (18000 seconds)
+- Running time: 2 hours (7200 seconds)
+
+```
+Overall Power = (3.5 × 1000) / (18000 / 3600)
+              = 3500 / 5
+              = 700 W
+```
+
+**Meaning**: Over the entire 5 hours at 5°C, the heat pump averaged 700W (including idle time).
+
+#### Verification
+
+```
+Duty Cycle = (running_time_seconds / total_time_seconds) × 100
+           = (7200 / 18000) × 100
+           = 40%
+
+Overall Power = Running Power × (Duty Cycle / 100)
+              = 1750 × 0.40
+              = 700 W ✓
+```
+
+#### Data Accumulation
+
+Every coordinator update:
+1. Calculate time elapsed since last update
+2. Calculate energy consumed (delta from energy sensor)
+3. **Attribute to PREVIOUS temperature bucket** (where heat pump was operating)
+4. Add time elapsed to `total_time_seconds`
+5. If heat pump was running, add:
+   - Time to `running_time_seconds`
+   - Energy delta to `total_energy_kwh`
+
+The metrics accumulate over the integration's lifetime, providing increasingly accurate averages as more data is collected at each temperature.
 
 ### Data Updates
 

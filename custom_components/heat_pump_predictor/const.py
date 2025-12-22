@@ -22,3 +22,10 @@ TRANSLATION_KEY_ENERGY = "total_energy"
 TRANSLATION_KEY_AVG_POWER_RUNNING = "avg_power_running"
 TRANSLATION_KEY_AVG_POWER_OVERALL = "avg_power_overall"
 TRANSLATION_KEY_DUTY_CYCLE = "duty_cycle"
+
+# Service names
+SERVICE_CALCULATE_ENERGY = "calculate_energy"
+
+# Service attributes
+ATTR_TEMPERATURE = "temperature"
+ATTR_CONFIG_ENTRY_ID = "config_entry_id"
