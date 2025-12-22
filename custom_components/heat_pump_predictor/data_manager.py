@@ -111,11 +111,18 @@ class HeatPumpDataManager:
         # Update bucket data
         bucket.total_time_seconds += time_delta_seconds
         
-        if self._last_running_state and energy_delta_kwh > 0:
-            bucket.running_time_seconds += time_delta_seconds
+        # Always add energy if consumed (includes water pump, standby, etc.)
+        if energy_delta_kwh > 0:
             bucket.total_energy_kwh += energy_delta_kwh
+        
+        # Only count running time when heat pump is actively running
+        if self._last_running_state:
+            bucket.running_time_seconds += time_delta_seconds
             _LOGGER.debug("Updated bucket %d°C: +%.2f kWh, +%.1f s running",
                          bucket_temp, energy_delta_kwh, time_delta_seconds)
+        elif energy_delta_kwh > 0:
+            _LOGGER.debug("Updated bucket %d°C: +%.2f kWh (idle consumption)",
+                         bucket_temp, energy_delta_kwh)
         
         bucket.last_update = timestamp
         
