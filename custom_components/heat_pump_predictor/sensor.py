@@ -39,24 +39,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 key=f"total_energy_{temp}", translation_key=TRANSLATION_KEY_ENERGY, bucket_temp=temp,
                 device_class=SensorDeviceClass.ENERGY, native_unit_of_measurement="kWh",
                 state_class=SensorStateClass.TOTAL_INCREASING, entity_registry_enabled_default=False,
+                icon="mdi:lightning-bolt",
                 value_fn=lambda data: data.total_energy_kwh,
             )),
             HeatPumpSensor(coordinator, HeatPumpSensorEntityDescription(
                 key=f"avg_power_running_{temp}", translation_key=TRANSLATION_KEY_AVG_POWER_RUNNING, bucket_temp=temp,
                 device_class=SensorDeviceClass.POWER, native_unit_of_measurement="W",
                 state_class=SensorStateClass.MEASUREMENT, entity_registry_enabled_default=False,
+                icon="mdi:flash",
                 value_fn=lambda data: data.average_power_when_running,
             )),
             HeatPumpSensor(coordinator, HeatPumpSensorEntityDescription(
                 key=f"avg_power_overall_{temp}", translation_key=TRANSLATION_KEY_AVG_POWER_OVERALL, bucket_temp=temp,
                 device_class=SensorDeviceClass.POWER, native_unit_of_measurement="W",
                 state_class=SensorStateClass.MEASUREMENT, entity_registry_enabled_default=False,
+                icon="mdi:flash",
                 value_fn=lambda data: data.average_power_overall,
             )),
             HeatPumpSensor(coordinator, HeatPumpSensorEntityDescription(
                 key=f"duty_cycle_{temp}", translation_key=TRANSLATION_KEY_DUTY_CYCLE, bucket_temp=temp,
                 native_unit_of_measurement="%", state_class=SensorStateClass.MEASUREMENT,
                 suggested_display_precision=2, entity_registry_enabled_default=False,
+                icon="mdi:percent",
                 value_fn=lambda data: data.duty_cycle_percent,
             )),
         ])
@@ -107,6 +111,7 @@ class HeatPumpPerformanceCurveSensor(CoordinatorEntity[HeatPumpCoordinator], Sen
     """Sensor providing chart-ready performance curve data."""
     
     _attr_has_entity_name = True
+    _attr_icon = "mdi:chart-bell-curve"
     
     def __init__(self, coordinator: HeatPumpCoordinator, key: str, name: str) -> None:
         """Initialize the performance curve sensor."""
