@@ -11,7 +11,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, MIN_TEMP, MAX_TEMP, TRANSLATION_KEY_ENERGY, TRANSLATION_KEY_AVG_POWER_RUNNING, TRANSLATION_KEY_AVG_POWER_OVERALL, TRANSLATION_KEY_DUTY_CYCLE
+from .const import (
+    DOMAIN,
+    MIN_TEMP,
+    MAX_TEMP,
+    TRANSLATION_KEY_ENERGY,
+    TRANSLATION_KEY_AVG_POWER_RUNNING,
+    TRANSLATION_KEY_AVG_POWER_OVERALL,
+    TRANSLATION_KEY_DUTY_CYCLE,
+)
 from .coordinator import HeatPumpCoordinator
 from .data_manager import TemperatureBucketData
 
@@ -62,8 +70,18 @@ class HeatPumpSensor(CoordinatorEntity[HeatPumpCoordinator], SensorEntity):
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{description.key}"
-        self._attr_translation_placeholders = {"temperature": str(description.bucket_temp)}
         self._attr_device_info = coordinator.device_info
+        
+        # Set explicit name with temperature
+        temp = description.bucket_temp
+        if description.translation_key == TRANSLATION_KEY_ENERGY:
+            self._attr_name = f"Energy at {temp}°C"
+        elif description.translation_key == TRANSLATION_KEY_AVG_POWER_RUNNING:
+            self._attr_name = f"Average power (running) at {temp}°C"
+        elif description.translation_key == TRANSLATION_KEY_AVG_POWER_OVERALL:
+            self._attr_name = f"Average power (overall) at {temp}°C"
+        elif description.translation_key == TRANSLATION_KEY_DUTY_CYCLE:
+            self._attr_name = f"Duty cycle at {temp}°C"
 
     @property
     def native_value(self) -> float | None:
