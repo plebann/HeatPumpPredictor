@@ -124,3 +124,34 @@ class HeatPumpDataManager:
         self._last_energy_kwh = current_energy_kwh
         self._last_running_state = is_running
         self._last_update_time = timestamp
+    
+    def to_dict(self) -> dict:
+        """Serialize buckets to dictionary for storage."""
+        return {
+            str(temp): {
+                "temperature": bucket.temperature,
+                "total_energy_kwh": bucket.total_energy_kwh,
+                "total_time_seconds": bucket.total_time_seconds,
+                "running_time_seconds": bucket.running_time_seconds,
+                "last_update": bucket.last_update.isoformat() if bucket.last_update else None,
+            }
+            for temp, bucket in self.buckets.items()
+        }
+    
+    def from_dict(self, data: dict) -> None:
+        """Restore buckets from dictionary."""
+        for temp_str, bucket_data in data.items():
+            temp = int(temp_str)
+            if temp in self.buckets:
+                last_update = None
+                if bucket_data.get("last_update"):
+                    last_update = datetime.fromisoformat(bucket_data["last_update"])
+                
+                self.buckets[temp] = TemperatureBucketData(
+                    temperature=bucket_data["temperature"],
+                    total_energy_kwh=bucket_data["total_energy_kwh"],
+                    total_time_seconds=bucket_data["total_time_seconds"],
+                    running_time_seconds=bucket_data["running_time_seconds"],
+                    last_update=last_update,
+                )
+        _LOGGER.info("Restored %d temperature buckets from storage", len(data))
