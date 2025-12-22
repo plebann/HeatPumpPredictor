@@ -60,6 +60,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 value_fn=lambda data: data.duty_cycle_percent,
             )),
         ])
+    
+    # Add performance curve sensors (enabled by default)
+    entities.extend([
+        HeatPumpPerformanceCurveSensor(coordinator, "power_curve", "Power Curve"),
+        HeatPumpPerformanceCurveSensor(coordinator, "duty_cycle_curve", "Duty Cycle Curve"),
+        HeatPumpPerformanceCurveSensor(coordinator, "energy_distribution", "Energy Distribution"),
+    ])
+    
     async_add_entities(entities)
     _LOGGER.info("Created %d heat pump predictor sensors", len(entities))
 
@@ -90,3 +98,70 @@ class HeatPumpSensor(CoordinatorEntity[HeatPumpCoordinator], SensorEntity):
         if bucket and self.entity_description.value_fn:
             return self.entity_description.value_fn(bucket)
         return None
+
+
+class HeatPumpPerformanceCurveSensor(CoordinatorEntity[HeatPumpCoordinator], SensorEntity):
+    """Sensor providing chart-ready performance curve data."""
+    
+    _attr_has_entity_name = True
+    
+    def __init__(self, coordinator: HeatPumpCoordinator, key: str, name: str) -> None:
+        """Initialize the performance curve sensor."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{key}"
+        self._attr_device_info = coordinator.device_info
+        self._attr_name = name
+        self._key = key
+    
+    @property
+    def native_value(self) -> str:
+        """Return sensor state."""
+        return "ok"
+    
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return chart-ready data as attributes."""
+        if self._key == "power_curve":
+            return self._get_power_curve_data()
+        elif self._key == "duty_cycle_curve":
+            return self._get_duty_cycle_curve_data()
+        elif self._key == "energy_distribution":
+            return self._get_energy_distribution_data()
+        return {}
+    
+    def _get_power_curve_data(self) -> dict:
+        """Generate power consumption curve data."""
+        data = []
+        for temp in range(MIN_TEMP, MAX_TEMP + 1):
+            bucket = self.coordinator.data_manager.buckets.get(temp)
+            if bucket and bucket.total_time_seconds > 0:
+                data.append({
+                    "temp": temp,
+                    "power_overall": round(bucket.average_power_overall, 1),
+                    "power_running": round(bucket.average_power_when_running, 1),
+                })
+        return {"data": data}
+    
+    def _get_duty_cycle_curve_data(self) -> dict:
+        """Generate duty cycle curve data."""
+        data = []
+        for temp in range(MIN_TEMP, MAX_TEMP + 1):
+            bucket = self.coordinator.data_manager.buckets.get(temp)
+            if bucket and bucket.total_time_seconds > 0:
+                data.append({
+                    "temp": temp,
+                    "duty_cycle": round(bucket.duty_cycle_percent, 2),
+                })
+        return {"data": data}
+    
+    def _get_energy_distribution_data(self) -> dict:
+        """Generate energy distribution data."""
+        data = []
+        for temp in range(MIN_TEMP, MAX_TEMP + 1):
+            bucket = self.coordinator.data_manager.buckets.get(temp)
+            if bucket and bucket.total_energy_kwh > 0:
+                data.append({
+                    "temp": temp,
+                    "energy": round(bucket.total_energy_kwh, 2),
+                })
+        return {"data": data}

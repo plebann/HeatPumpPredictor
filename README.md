@@ -101,7 +101,9 @@ The integration requires three sensors from your heat pump system:
 
 ## Usage
 
-After configuration, 224 sensors will be created (disabled by default):
+After configuration, the integration creates:
+
+### Temperature-Specific Sensors (224 total, disabled by default)
 - `sensor.heat_pump_predictor_total_energy_<temp>`
 - `sensor.heat_pump_predictor_avg_power_running_<temp>`
 - `sensor.heat_pump_predictor_avg_power_overall_<temp>`
@@ -113,6 +115,27 @@ Enable sensors for temperatures relevant to your climate. For example, if you ty
 - `sensor.heat_pump_predictor_total_energy_0`
 - `sensor.heat_pump_predictor_avg_power_running_5`
 - `sensor.heat_pump_predictor_duty_cycle_10`
+
+### Performance Curve Sensors (enabled by default)
+
+The integration automatically creates three sensors with chart-ready data:
+
+#### 1. Power Curve (`sensor.heat_pump_predictor_power_curve`)
+- **Purpose**: Shows power consumption across all temperatures
+- **Data**: `{temp, power_overall, power_running}` for each temperature
+- **Use**: Visualize how power consumption changes with outdoor temperature
+
+#### 2. Duty Cycle Curve (`sensor.heat_pump_predictor_duty_cycle_curve`)
+- **Purpose**: Shows duty cycle percentage across all temperatures
+- **Data**: `{temp, duty_cycle}` for each temperature
+- **Use**: Identify at what temperatures your heat pump struggles (high duty cycle)
+
+#### 3. Energy Distribution (`sensor.heat_pump_predictor_energy_distribution`)
+- **Purpose**: Shows total energy consumed at each temperature
+- **Data**: `{temp, energy}` for each temperature
+- **Use**: Determine which temperatures cost you the most to heat
+
+These sensors update automatically whenever bucket data changes and only include temperatures with actual data.
 
 ## Sensor Types Explained
 
@@ -248,7 +271,164 @@ The metrics accumulate over the integration's lifetime, providing increasingly a
 
 - **Immediate**: State changes trigger instant updates
 - **Periodic**: 5-minute polling ensures data consistency
+- **Persistence**: Data is saved to disk and survives Home Assistant restarts
 - **Statistics**: Home Assistant recorder integration for 60-day retention
+
+## Visualization
+
+### ApexCharts Integration
+
+The integration provides performance curve sensors designed for easy visualization with [ApexCharts Card](https://github.com/RomRider/apexcharts-card).
+
+#### Power Consumption Curve
+
+Visualize how power consumption varies with outdoor temperature:
+
+```yaml
+type: custom:apexcharts-card
+header:
+  title: Heat Pump Power by Temperature
+  show: true
+apex_config:
+  chart:
+    height: 350
+  xaxis:
+    title:
+      text: Temperature (°C)
+  yaxis:
+    - title:
+        text: Power (W)
+series:
+  - entity: sensor.heat_pump_predictor_power_curve
+    attribute: data
+    type: line
+    name: Overall Power
+    data_generator: |
+      return entity.attributes.data.map(d => [d.temp, d.power_overall]);
+  - entity: sensor.heat_pump_predictor_power_curve
+    attribute: data
+    type: line
+    name: Running Power
+    data_generator: |
+      return entity.attributes.data.map(d => [d.temp, d.power_running]);
+```
+
+**What it shows**: The heat pump's efficiency "sweet spot" and how hard it works at different temperatures.
+
+#### Duty Cycle Analysis
+
+See how often your heat pump runs at each temperature:
+
+```yaml
+type: custom:apexcharts-card
+header:
+  title: Heat Pump Duty Cycle by Temperature
+  show: true
+apex_config:
+  chart:
+    height: 300
+  xaxis:
+    title:
+      text: Temperature (°C)
+  yaxis:
+    title:
+      text: Duty Cycle (%)
+    max: 100
+series:
+  - entity: sensor.heat_pump_predictor_duty_cycle_curve
+    attribute: data
+    type: area
+    name: Duty Cycle
+    data_generator: |
+      return entity.attributes.data.map(d => [d.temp, d.duty_cycle]);
+```
+
+**What it shows**: 
+- High duty cycle (>80%) = heat pump struggles, runs constantly
+- Low duty cycle (<30%) = comfortable operating conditions
+- 100% = heat pump undersized or extremely cold
+
+#### Energy Cost Analysis
+
+Identify which temperatures cost the most to heat:
+
+```yaml
+type: custom:apexcharts-card
+header:
+  title: Energy Consumed by Temperature
+  show: true
+apex_config:
+  chart:
+    type: bar
+    height: 300
+  xaxis:
+    title:
+      text: Temperature (°C)
+  yaxis:
+    title:
+      text: Energy (kWh)
+series:
+  - entity: sensor.heat_pump_predictor_energy_distribution
+    attribute: data
+    name: Energy Consumed
+    data_generator: |
+      return entity.attributes.data.map(d => [d.temp, d.energy]);
+```
+
+**What it shows**: Which temperatures account for most of your heating costs. Useful for:
+- Understanding seasonal energy usage patterns
+- Identifying optimization opportunities
+- Predicting heating costs based on weather forecasts
+
+### Dashboard Example
+
+Create a comprehensive heat pump analysis dashboard:
+
+```yaml
+type: vertical-stack
+cards:
+  # Current performance at outdoor temperature
+  - type: entities
+    title: Current Performance
+    entities:
+      - entity: sensor.outdoor_temperature
+        name: Outdoor Temperature
+      - type: custom:template-entity-row
+        name: Power Usage Now
+        state: >
+          {% set temp = states('sensor.outdoor_temperature')|round(0,'floor') %}
+          {{ states('sensor.heat_pump_predictor_avg_power_overall_' ~ temp) }} W
+      - type: custom:template-entity-row
+        name: Duty Cycle Now
+        state: >
+          {% set temp = states('sensor.outdoor_temperature')|round(0,'floor') %}
+          {{ states('sensor.heat_pump_predictor_duty_cycle_' ~ temp) }}%
+  
+  # Performance curves
+  - type: custom:apexcharts-card
+    header:
+      title: Power Consumption Curve
+    series:
+      - entity: sensor.heat_pump_predictor_power_curve
+        attribute: data
+        data_generator: |
+          return entity.attributes.data.map(d => [d.temp, d.power_overall]);
+  
+  # Energy distribution
+  - type: custom:apexcharts-card
+    header:
+      title: Energy by Temperature
+    apex_config:
+      chart:
+        type: bar
+    series:
+      - entity: sensor.heat_pump_predictor_energy_distribution
+        attribute: data
+        data_generator: |
+          return entity.attributes.data.map(d => [d.temp, d.energy]);
+```
+
+**Note**: The performance curve sensors automatically update whenever bucket data changes and only include temperatures where actual data has been collected.
 
 ## Troubleshooting
 
