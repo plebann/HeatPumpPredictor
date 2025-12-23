@@ -135,19 +135,30 @@ class HeatPumpDataManager:
     def to_dict(self) -> dict:
         """Serialize buckets to dictionary for storage."""
         return {
-            str(temp): {
-                "temperature": bucket.temperature,
-                "total_energy_kwh": bucket.total_energy_kwh,
-                "total_time_seconds": bucket.total_time_seconds,
-                "running_time_seconds": bucket.running_time_seconds,
-                "last_update": bucket.last_update.isoformat() if bucket.last_update else None,
+            "buckets": {
+                str(temp): {
+                    "temperature": bucket.temperature,
+                    "total_energy_kwh": bucket.total_energy_kwh,
+                    "total_time_seconds": bucket.total_time_seconds,
+                    "running_time_seconds": bucket.running_time_seconds,
+                    "last_update": bucket.last_update.isoformat() if bucket.last_update else None,
+                }
+                for temp, bucket in self.buckets.items()
+            },
+            "tracking": {
+                "last_temperature": self._last_temperature,
+                "last_energy_kwh": self._last_energy_kwh,
+                "last_running_state": self._last_running_state,
+                "last_update_time": self._last_update_time.isoformat() if self._last_update_time else None,
             }
-            for temp, bucket in self.buckets.items()
         }
     
     def from_dict(self, data: dict) -> None:
         """Restore buckets from dictionary."""
-        for temp_str, bucket_data in data.items():
+        # Handle both old format (flat dict) and new format (with buckets key)
+        buckets_data = data.get("buckets", data)
+        
+        for temp_str, bucket_data in buckets_data.items():
             temp = int(temp_str)
             if temp in self.buckets:
                 last_update = None
@@ -161,4 +172,16 @@ class HeatPumpDataManager:
                     running_time_seconds=bucket_data["running_time_seconds"],
                     last_update=last_update,
                 )
-        _LOGGER.info("Restored %d temperature buckets from storage", len(data))
+        
+        # Restore tracking state (critical for correct delta calculations after restart)
+        if "tracking" in data:
+            tracking = data["tracking"]
+            self._last_temperature = tracking.get("last_temperature")
+            self._last_energy_kwh = tracking.get("last_energy_kwh")
+            self._last_running_state = tracking.get("last_running_state")
+            if tracking.get("last_update_time"):
+                self._last_update_time = datetime.fromisoformat(tracking["last_update_time"])
+            _LOGGER.info("Restored tracking state: temp=%.1f°C, energy=%.2f kWh", 
+                        self._last_temperature or 0, self._last_energy_kwh or 0)
+        
+        _LOGGER.info("Restored %d temperature buckets from storage", len(buckets_data))

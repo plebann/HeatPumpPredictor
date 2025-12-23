@@ -59,7 +59,7 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[int, TemperatureBucketData]
     async def async_setup(self) -> None:
         # Load saved data before first refresh
         if data := await self._store.async_load():
-            self.data_manager.from_dict(data.get("buckets", {}))
+            self.data_manager.from_dict(data)
             _LOGGER.info("Loaded saved heat pump data from storage")
         
         await self.async_config_entry_first_refresh()
@@ -78,7 +78,7 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[int, TemperatureBucketData]
     async def _save_data(self) -> None:
         """Save bucket data to storage."""
         try:
-            await self._store.async_save({"buckets": self.data_manager.to_dict()})
+            await self._store.async_save(self.data_manager.to_dict())
         except Exception as err:
             _LOGGER.error("Failed to save data to storage: %s", err)
 
