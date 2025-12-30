@@ -1,10 +1,10 @@
 ﻿"""Coordinator for Heat Pump Predictor integration."""
 from __future__ import annotations
 
-from datetime import timedelta
 import logging
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, Event, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_track_state_change_event
@@ -29,7 +29,9 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[int, TemperatureBucketData]
         self._running_entity = entry.data[CONF_RUNNING_SENSOR]
         self._temperature_entity = entry.data[CONF_TEMPERATURE_SENSOR]
         self._unsub_state_listener = None
+        self._unsub_stop_listener = None
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}.{entry.entry_id}")
+        self._save_debounce_seconds = 5
         
         # Create device info
         self.device_info = DeviceInfo(
@@ -66,6 +68,9 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[int, TemperatureBucketData]
         self._unsub_state_listener = async_track_state_change_event(
             self.hass, [self._energy_entity, self._running_entity, self._temperature_entity], self._handle_state_change
         )
+        self._unsub_stop_listener = self.hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STOP, self._handle_hass_stop
+        )
 
     async def async_shutdown(self) -> None:
         # Save data before shutdown
@@ -74,13 +79,25 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[int, TemperatureBucketData]
         
         if self._unsub_state_listener:
             self._unsub_state_listener()
+        if self._unsub_stop_listener:
+            self._unsub_stop_listener()
     
     async def _save_data(self) -> None:
         """Save bucket data to storage."""
         try:
+            _LOGGER.debug("Saving heat pump data to storage")
             await self._store.async_save(self.data_manager.to_dict())
         except Exception as err:
             _LOGGER.error("Failed to save data to storage: %s", err)
+
+    @callback
+    def _schedule_debounced_save(self) -> None:
+        """Schedule a debounced save to storage."""
+        self._store.async_delay_save(self.data_manager.to_dict, self._save_debounce_seconds)
+
+    async def _handle_hass_stop(self, event: Event) -> None:
+        """Handle Home Assistant stop to flush data."""
+        await self._save_data()
 
     @callback
     def _handle_state_change(self, event: Event) -> None:
@@ -93,6 +110,10 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[int, TemperatureBucketData]
             self.data_manager.process_state_update(
                 float(temp_state.state), float(energy_state.state), running_state.state == "on", dt_util.utcnow()
             )
-            self.async_set_updated_data(self.data_manager.buckets)
+            # Update coordinator data without cancelling the scheduled refresh
+            self.data = self.data_manager.buckets
+            self.last_update_success = True
+            self.async_update_listeners()
+            self._schedule_debounced_save()
         except (ValueError, TypeError):
             pass
