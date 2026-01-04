@@ -36,13 +36,13 @@ calculate_forecast_energy:
           step: 1
     hours_ahead:
       name: Hours ahead
-      description: Number of hours to include starting from starting_hour (1-24).
+      description: Number of hours to include starting from starting_hour (1-48).
       required: true
       example: 7
       selector:
         number:
           min: 1
-          max: 24
+          max: 48
           step: 1
     config_entry_id:
       name: Config Entry ID

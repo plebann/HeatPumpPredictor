@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 
 import voluptuous as vol
 
@@ -22,6 +23,7 @@ from .const import (
     SERVICE_CALCULATE_FORECAST_ENERGY,
     ATTR_STARTING_HOUR,
     ATTR_HOURS_AHEAD,
+    CONF_CURRENT_TEMPERATURE_SENSOR,
 )
 from .coordinator import HeatPumpCoordinator
 
@@ -40,7 +42,7 @@ SERVICE_CALCULATE_ENERGY_SCHEMA = vol.Schema({
 
 SERVICE_CALCULATE_FORECAST_ENERGY_SCHEMA = vol.Schema({
     vol.Required(ATTR_STARTING_HOUR): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
-    vol.Required(ATTR_HOURS_AHEAD): vol.All(vol.Coerce(int), vol.Range(min=1, max=24)),
+    vol.Required(ATTR_HOURS_AHEAD): vol.All(vol.Coerce(int), vol.Range(min=1, max=48)),
     vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
 })
 
@@ -161,6 +163,66 @@ def _estimate_power_for_temperature(
     }
 
 
+def _combine_confidence(conf_a: str, conf_b: str, approximated: bool) -> str:
+    """Combine two confidence labels conservatively."""
+    if approximated:
+        return "approximated"
+    if "low" in (conf_a, conf_b):
+        return "low"
+    if "medium" in (conf_a, conf_b):
+        return "medium"
+    return "high"
+
+
+def _interpolate_estimation(
+    coordinator: HeatPumpCoordinator, temperature: float
+) -> dict[str, float | int | str | bool | None]:
+    """Estimate power for fractional temperatures via linear interpolation."""
+    lower = max(MIN_TEMP, min(MAX_TEMP, math.floor(temperature)))
+    upper = max(MIN_TEMP, min(MAX_TEMP, math.ceil(temperature)))
+
+    if lower == upper:
+        return _estimate_power_for_temperature(coordinator, float(temperature))
+
+    lower_est = _estimate_power_for_temperature(coordinator, float(lower))
+    upper_est = _estimate_power_for_temperature(coordinator, float(upper))
+    weight = (temperature - lower) / (upper - lower)
+
+    def _lerp(a: float, b: float, w: float) -> float:
+        return a + (b - a) * w
+
+    approximated = bool(lower_est["approximated"] or upper_est["approximated"])
+    confidence = _combine_confidence(
+        str(lower_est["confidence"]), str(upper_est["confidence"]), approximated
+    )
+
+    return {
+        "power_overall_w": _lerp(float(lower_est["power_overall_w"]), float(upper_est["power_overall_w"]), weight),
+        "power_running_w": _lerp(float(lower_est["power_running_w"]), float(upper_est["power_running_w"]), weight),
+        "duty_cycle_percent": _lerp(float(lower_est["duty_cycle_percent"]), float(upper_est["duty_cycle_percent"]), weight),
+        "temperature_bucket": temperature,
+        "confidence": confidence,
+        "approximated": approximated,
+        "approximation_source": lower_est.get("approximation_source") or upper_est.get("approximation_source"),
+        "data_points_hours": min(
+            float(lower_est.get("data_points_hours", 0.0)),
+            float(upper_est.get("data_points_hours", 0.0)),
+        ),
+    }
+
+
+def _trend_adjustment(delta: float) -> float:
+    """Calculate adjustment factor based on hour-to-hour temperature delta."""
+    if delta == 0:
+        return 1.0
+
+    ratio = min(1.0, abs(delta) / 1.5)
+    factor = 0.20 * ratio
+    if delta < 0:
+        return 1.0 + factor  # getting colder -> more energy
+    return max(0.0, 1.0 - factor)  # getting warmer -> less energy
+
+
 @callback
 def async_setup_services(hass: HomeAssistant) -> None:
     """Set up services for Heat Pump Predictor integration."""
@@ -198,6 +260,16 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
         coordinator = _get_coordinator_for_service(hass, config_entry_id)
 
+        current_temp_state = hass.states.get(
+            coordinator.config_entry.data.get(CONF_CURRENT_TEMPERATURE_SENSOR)
+        )
+        current_temperature: float | None = None
+        if current_temp_state:
+            try:
+                current_temperature = float(current_temp_state.state)
+            except (TypeError, ValueError):
+                current_temperature = None
+
         if not coordinator.hourly_forecast:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -234,6 +306,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
         hour_details: list[dict[str, object]] = []
         approximated_hours = 0
 
+        previous_temp: float | None = current_temperature
+
         for dt_val, payload in window:
             temperature = payload.get("temperature") if isinstance(payload, dict) else None
             if temperature is None:
@@ -243,21 +317,34 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     translation_placeholders={"datetime": dt_val.isoformat()},
                 )
 
-            estimation = _estimate_power_for_temperature(coordinator, float(temperature))
+            temp_float = float(temperature)
+            estimation = _interpolate_estimation(coordinator, temp_float)
+
+            delta = None
+            if previous_temp is not None:
+                delta = temp_float - previous_temp
+
             energy_kwh = estimation["power_overall_w"] / 1000.0
+            if delta is not None:
+                energy_kwh *= _trend_adjustment(delta)
+
             total_energy_kwh += energy_kwh
             approximated_hours += 1 if estimation["approximated"] else 0
 
             hour_details.append(
                 {
                     "datetime": dt_val.isoformat(),
-                    "temperature": float(temperature),
+                    "temperature": temp_float,
+                    "temperature_delta": delta,
+                    "trend_adjustment": None if delta is None else _trend_adjustment(delta),
                     "energy_kwh": round(energy_kwh, 3),
                     "confidence": estimation["confidence"],
                     "approximated": estimation["approximated"],
                     "approximation_source": estimation["approximation_source"],
                 }
             )
+
+            previous_temp = temp_float
 
         return {
             "total_energy_kwh": round(total_energy_kwh, 3),

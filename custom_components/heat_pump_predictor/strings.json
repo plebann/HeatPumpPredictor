@@ -8,6 +8,7 @@
           "energy_sensor": "Energy Sensor",
           "running_sensor": "Running Sensor",
           "temperature_sensor": "Temperature Sensor",
+          "current_temperature_sensor": "Current Temperature Sensor",
           "weather_entity": "Weather Entity"
         }
       }
@@ -65,7 +66,7 @@
         },
         "hours_ahead": {
           "name": "Hours ahead",
-          "description": "Number of hours to include (1-24)"
+          "description": "Number of hours to include (1-48)"
         },
         "config_entry_id": {
           "name": "Config Entry ID",

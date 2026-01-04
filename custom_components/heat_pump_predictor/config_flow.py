@@ -16,6 +16,7 @@ from .const import (
     CONF_ENERGY_SENSOR,
     CONF_RUNNING_SENSOR,
     CONF_TEMPERATURE_SENSOR,
+    CONF_CURRENT_TEMPERATURE_SENSOR,
     CONF_WEATHER_ENTITY,
 )
 
@@ -71,6 +72,12 @@ class HeatPumpPredictorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             device_class=SensorDeviceClass.TEMPERATURE,
                         )
                     ),
+                    vol.Required(CONF_CURRENT_TEMPERATURE_SENSOR): selector.EntitySelector(
+                        selector.EntitySelectorConfig(
+                            domain="sensor",
+                            device_class=SensorDeviceClass.TEMPERATURE,
+                        )
+                    ),
                     vol.Required(CONF_WEATHER_ENTITY): selector.EntitySelector(
                         selector.EntitySelectorConfig(domain="weather")
                     ),
@@ -84,6 +91,7 @@ class HeatPumpPredictorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         energy_state = self.hass.states.get(user_input[CONF_ENERGY_SENSOR])
         running_state = self.hass.states.get(user_input[CONF_RUNNING_SENSOR])
         temp_state = self.hass.states.get(user_input[CONF_TEMPERATURE_SENSOR])
+        current_temp_state = self.hass.states.get(user_input[CONF_CURRENT_TEMPERATURE_SENSOR])
         weather_state = self.hass.states.get(user_input[CONF_WEATHER_ENTITY])
 
         if energy_state is None:
@@ -92,6 +100,8 @@ class HeatPumpPredictorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             raise ValueError(f"Running sensor {user_input[CONF_RUNNING_SENSOR]} not found")
         if temp_state is None:
             raise ValueError(f"Temperature sensor {user_input[CONF_TEMPERATURE_SENSOR]} not found")
+        if current_temp_state is None:
+            raise ValueError(f"Current temperature sensor {user_input[CONF_CURRENT_TEMPERATURE_SENSOR]} not found")
         if weather_state is None:
             raise ValueError(f"Weather entity {user_input[CONF_WEATHER_ENTITY]} not found")
 
@@ -104,6 +114,11 @@ class HeatPumpPredictorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             float(temp_state.state)
         except (ValueError, TypeError) as err:
             raise ValueError("Temperature sensor must have numeric value") from err
+
+        try:
+            float(current_temp_state.state)
+        except (ValueError, TypeError) as err:
+            raise ValueError("Current temperature sensor must have numeric value") from err
 
         if running_state.state not in ("on", "off"):
             raise ValueError("Running sensor must be a binary sensor (on/off)")
