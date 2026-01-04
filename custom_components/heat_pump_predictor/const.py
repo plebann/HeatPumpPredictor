@@ -16,7 +16,6 @@ UPDATE_INTERVAL = timedelta(minutes=5)
 CONF_ENERGY_SENSOR = "energy_sensor"
 CONF_RUNNING_SENSOR = "running_sensor"
 CONF_TEMPERATURE_SENSOR = "temperature_sensor"
-CONF_CURRENT_TEMPERATURE_SENSOR = "current_temperature_sensor"
 CONF_WEATHER_ENTITY = "weather_entity"
 
 # Entity translation keys

@@ -8,7 +8,6 @@
           "energy_sensor": "Energy Sensor",
           "running_sensor": "Running Sensor",
           "temperature_sensor": "Temperature Sensor",
-          "current_temperature_sensor": "Current Temperature Sensor",
           "weather_entity": "Weather Entity"
         }
       }

@@ -23,7 +23,7 @@ from .const import (
     SERVICE_CALCULATE_FORECAST_ENERGY,
     ATTR_STARTING_HOUR,
     ATTR_HOURS_AHEAD,
-    CONF_CURRENT_TEMPERATURE_SENSOR,
+    CONF_TEMPERATURE_SENSOR,
 )
 from .coordinator import HeatPumpCoordinator
 
@@ -260,12 +260,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
         coordinator = _get_coordinator_for_service(hass, config_entry_id)
 
-        current_temp_entity = (
-            coordinator.config_entry.data.get(CONF_CURRENT_TEMPERATURE_SENSOR)
-            or coordinator.config_entry.options.get(CONF_CURRENT_TEMPERATURE_SENSOR)
-            or coordinator.config_entry.data.get(ATTR_TEMPERATURE)
-        )
-
+        current_temp_entity = coordinator.config_entry.data.get(CONF_TEMPERATURE_SENSOR)
         current_temp_state = hass.states.get(current_temp_entity) if current_temp_entity else None
         current_temperature: float | None = None
         if current_temp_state:
