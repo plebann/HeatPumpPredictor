@@ -8,7 +8,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.components.sensor import SensorDeviceClass
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
 
 from .const import (
@@ -139,10 +139,22 @@ class HeatPumpPredictorOptionsFlow(config_entries.OptionsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Required(
-                        CONF_WEATHER_ENTITY,
-                        default=current_weather,
-                    ): selector.EntitySelector(
+                    vol.Required(CONF_ENERGY_SENSOR): selector.EntitySelector(
+                        selector.EntitySelectorConfig(
+                            domain="sensor",
+                            device_class=SensorDeviceClass.ENERGY,
+                        )
+                    ),
+                    vol.Required(CONF_RUNNING_SENSOR): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="binary_sensor")
+                    ),
+                    vol.Required(CONF_TEMPERATURE_SENSOR): selector.EntitySelector(
+                        selector.EntitySelectorConfig(
+                            domain="sensor",
+                            device_class=SensorDeviceClass.TEMPERATURE,
+                        )
+                    ),
+                    vol.Required(CONF_WEATHER_ENTITY): selector.EntitySelector(
                         selector.EntitySelectorConfig(domain="weather")
                     ),
                 }
@@ -151,9 +163,11 @@ class HeatPumpPredictorOptionsFlow(config_entries.OptionsFlow):
         )
 
 
-async def async_get_options_flow(
+@staticmethod
+@callback
+def async_get_options_flow(
     config_entry: config_entries.ConfigEntry,
-) -> HeatPumpPredictorOptionsFlow:
+) -> config_entries.OptionsFlow:
     """Get the options flow handler."""
 
     return HeatPumpPredictorOptionsFlow(config_entry)
