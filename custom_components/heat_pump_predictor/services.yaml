@@ -19,3 +19,34 @@ calculate_energy:
       required: false
       selector:
         text:
+
+calculate_forecast_energy:
+  name: Calculate forecast energy consumption
+  description: Calculate predicted energy consumption over a future window using cached hourly forecast.
+  fields:
+    starting_hour:
+      name: Starting hour
+      description: Local hour (0-23) to begin accumulation within the cached forecast window.
+      required: true
+      example: 15
+      selector:
+        number:
+          min: 0
+          max: 23
+          step: 1
+    hours_ahead:
+      name: Hours ahead
+      description: Number of hours to include starting from starting_hour (1-24).
+      required: true
+      example: 7
+      selector:
+        number:
+          min: 1
+          max: 24
+          step: 1
+    config_entry_id:
+      name: Config Entry ID
+      description: Config entry to use (optional, auto-detects if only one exists)
+      required: false
+      selector:
+        text:

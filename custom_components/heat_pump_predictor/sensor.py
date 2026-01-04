@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 import logging
-from typing import Callable
+from typing import Callable, Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -19,6 +22,7 @@ from .const import (
     TRANSLATION_KEY_AVG_POWER_RUNNING,
     TRANSLATION_KEY_AVG_POWER_OVERALL,
     TRANSLATION_KEY_DUTY_CYCLE,
+    CONF_WEATHER_ENTITY,
 )
 from .coordinator import HeatPumpCoordinator
 from .data_manager import TemperatureBucketData
@@ -33,6 +37,17 @@ class HeatPumpSensorEntityDescription(SensorEntityDescription):
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: HeatPumpCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities = []
+    weather_entity = entry.data.get(CONF_WEATHER_ENTITY)
+    if weather_entity:
+        entities.append(
+            HeatPumpForecastSensor(
+                hass,
+                coordinator,
+                weather_entity,
+            )
+        )
+    else:
+        _LOGGER.error("Weather entity not configured; forecast cache sensor will not be created")
     for temp in range(MIN_TEMP, MAX_TEMP + 1):
         entities.extend([
             HeatPumpSensor(coordinator, HeatPumpSensorEntityDescription(
@@ -149,6 +164,77 @@ class HeatPumpPerformanceCurveSensor(CoordinatorEntity[HeatPumpCoordinator], Sen
                     "power_running": round(bucket.average_power_when_running, 1),
                 })
         return {"data": data}
+
+
+class HeatPumpForecastSensor(SensorEntity):
+    """Sensor that caches hourly weather forecast for downstream calculations."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_icon = "mdi:weather-partly-cloudy"
+
+    def __init__(self, hass: HomeAssistant, coordinator: HeatPumpCoordinator, weather_entity: str) -> None:
+        """Initialize the forecast cache sensor."""
+        self.hass = hass
+        self._coordinator = coordinator
+        self._weather_entity = weather_entity
+        self._attr_translation_key = "hourly_forecast_cache"
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_hourly_forecast"
+        self.entity_id = f"sensor.{DOMAIN}_hourly_forecast_{coordinator.config_entry.entry_id}"
+        self._attr_native_unit_of_measurement = "entries"
+        self._attr_native_value = None
+        self._forecast: list[dict[str, Any]] = []
+        self._unsub_refresh = None
+
+    async def async_added_to_hass(self) -> None:
+        """Handle sensor addition."""
+        await self._async_update_forecast()
+        self._unsub_refresh = async_track_time_interval(
+            self.hass, self._handle_refresh, timedelta(minutes=30)
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Clean up callbacks."""
+        if self._unsub_refresh:
+            self._unsub_refresh()
+            self._unsub_refresh = None
+
+    async def _handle_refresh(self, _now) -> None:
+        """Periodic refresh handler."""
+        await self._async_update_forecast()
+
+    async def _async_update_forecast(self) -> None:
+        """Fetch and cache the hourly forecast."""
+        try:
+            response = await self.hass.services.async_call(
+                "weather",
+                "get_forecast",
+                {"entity_id": self._weather_entity, "type": "hourly"},
+                blocking=True,
+                return_response=True,
+            )
+            forecast: list[dict[str, Any]] = []
+            if isinstance(response, dict):
+                forecast = response.get("forecast") or response.get("data") or []
+            if not isinstance(forecast, list):
+                forecast = []
+
+            # Limit to 24 entries max
+            self._forecast = forecast[:24]
+            self._coordinator.hourly_forecast = self._forecast
+            self._attr_native_value = len(self._forecast)
+            self.async_write_ha_state()
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.warning("Failed to update hourly forecast cache: %s", err)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the cached forecast list."""
+        return {
+            "forecast": self._forecast,
+            "last_updated": dt_util.utcnow().isoformat(),
+            "weather_entity": self._weather_entity,
+        }
     
     def _get_duty_cycle_curve_data(self) -> dict:
         """Generate duty cycle curve data."""

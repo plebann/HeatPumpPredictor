@@ -16,6 +16,7 @@ UPDATE_INTERVAL = timedelta(minutes=5)
 CONF_ENERGY_SENSOR = "energy_sensor"
 CONF_RUNNING_SENSOR = "running_sensor"
 CONF_TEMPERATURE_SENSOR = "temperature_sensor"
+CONF_WEATHER_ENTITY = "weather_entity"
 
 # Entity translation keys
 TRANSLATION_KEY_ENERGY = "total_energy"
@@ -25,7 +26,10 @@ TRANSLATION_KEY_DUTY_CYCLE = "duty_cycle"
 
 # Service names
 SERVICE_CALCULATE_ENERGY = "calculate_energy"
+SERVICE_CALCULATE_FORECAST_ENERGY = "calculate_forecast_energy"
 
 # Service attributes
 ATTR_TEMPERATURE = "temperature"
 ATTR_CONFIG_ENTRY_ID = "config_entry_id"
+ATTR_STARTING_HOUR = "starting_hour"
+ATTR_HOURS_AHEAD = "hours_ahead"

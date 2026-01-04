@@ -10,6 +10,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.util import dt as dt_util
 
 from .const import (
     ATTR_CONFIG_ENTRY_ID,
@@ -18,6 +19,9 @@ from .const import (
     MAX_TEMP,
     MIN_TEMP,
     SERVICE_CALCULATE_ENERGY,
+    SERVICE_CALCULATE_FORECAST_ENERGY,
+    ATTR_STARTING_HOUR,
+    ATTR_HOURS_AHEAD,
 )
 from .coordinator import HeatPumpCoordinator
 
@@ -31,6 +35,12 @@ SERVICE_CALCULATE_ENERGY_SCHEMA = vol.Schema({
         vol.Coerce(float),
         vol.Range(min=MIN_TEMP, max=MAX_TEMP)
     ),
+    vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
+})
+
+SERVICE_CALCULATE_FORECAST_ENERGY_SCHEMA = vol.Schema({
+    vol.Required(ATTR_STARTING_HOUR): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
+    vol.Required(ATTR_HOURS_AHEAD): vol.All(vol.Coerce(int), vol.Range(min=1, max=24)),
     vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
 })
 
@@ -82,6 +92,75 @@ def _calculate_confidence(total_time_seconds: float) -> str:
     return "low"
 
 
+def _estimate_power_for_temperature(
+    coordinator: HeatPumpCoordinator, temperature: float
+) -> dict[str, float | int | str | bool | None]:
+    """Estimate power metrics for a given temperature bucket (with approximation fallback)."""
+    bucket_index = coordinator.data_manager.get_bucket(temperature)
+    bucket_data = coordinator.data_manager.buckets[bucket_index]
+
+    is_approximated = False
+    approximation_source = None
+
+    if bucket_data.total_time_seconds == 0:
+        source_bucket_index = None
+        min_distance = float("inf")
+
+        for temp in range(MIN_TEMP, MAX_TEMP + 1):
+            if coordinator.data_manager.buckets[temp].total_time_seconds > 0:
+                distance = abs(temp - 0)
+                if distance < min_distance:
+                    min_distance = distance
+                    source_bucket_index = temp
+
+        if source_bucket_index is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="no_data_for_approximation",
+                translation_placeholders={"temperature": str(temperature)},
+            )
+
+        source_bucket_data = coordinator.data_manager.buckets[source_bucket_index]
+        is_approximated = True
+        approximation_source = source_bucket_index
+
+        midpoint = 25  # Temperature where usage is minimal
+        source_temp = source_bucket_index
+        target_temp = temperature
+
+        if target_temp <= midpoint:
+            temp_diff = target_temp - source_temp
+            multiplier = max(0.1, 1.0 - (0.20 * temp_diff))
+        else:
+            temp_diff_to_midpoint = midpoint - source_temp
+            multiplier_at_midpoint = max(0.1, 1.0 - (0.20 * temp_diff_to_midpoint))
+            temp_diff_from_midpoint = target_temp - midpoint
+            multiplier = multiplier_at_midpoint * (1.0 + (0.20 * temp_diff_from_midpoint))
+
+        power_overall = source_bucket_data.average_power_overall * multiplier
+        power_running = source_bucket_data.average_power_when_running * multiplier
+        duty_cycle = source_bucket_data.duty_cycle_percent
+        data_hours = source_bucket_data.total_time_seconds / 3600
+    else:
+        power_overall = bucket_data.average_power_overall
+        power_running = bucket_data.average_power_when_running
+        duty_cycle = bucket_data.duty_cycle_percent
+        data_hours = bucket_data.total_time_seconds / 3600
+
+    confidence = "approximated" if is_approximated else _calculate_confidence(bucket_data.total_time_seconds)
+
+    return {
+        "power_overall_w": power_overall,
+        "power_running_w": power_running,
+        "duty_cycle_percent": duty_cycle,
+        "temperature_bucket": bucket_index,
+        "confidence": confidence,
+        "approximated": is_approximated,
+        "approximation_source": approximation_source,
+        "data_points_hours": data_hours,
+    }
+
+
 @callback
 def async_setup_services(hass: HomeAssistant) -> None:
     """Set up services for Heat Pump Predictor integration."""
@@ -94,91 +173,99 @@ def async_setup_services(hass: HomeAssistant) -> None:
         # Get coordinator
         coordinator = _get_coordinator_for_service(hass, config_entry_id)
         
-        # Get temperature bucket
-        bucket_index = coordinator.data_manager.get_bucket(temperature)
-        bucket_data = coordinator.data_manager.buckets[bucket_index]
-        
-        # Check if we have data - approximate if needed
-        is_approximated = False
-        approximation_source = None
-        
-        if bucket_data.total_time_seconds == 0:
-            # Find bucket closest to 0°C that has data
-            source_bucket_index = None
-            min_distance = float('inf')
-            
-            for temp in range(MIN_TEMP, MAX_TEMP + 1):
-                if coordinator.data_manager.buckets[temp].total_time_seconds > 0:
-                    distance = abs(temp - 0)
-                    if distance < min_distance:
-                        min_distance = distance
-                        source_bucket_index = temp
-            
-            if source_bucket_index is None:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="no_data_for_approximation",
-                    translation_placeholders={
-                        "temperature": str(temperature),
-                    },
-                )
-            
-            # Use source bucket and calculate temperature-based multiplier
-            source_bucket_data = coordinator.data_manager.buckets[source_bucket_index]
-            is_approximated = True
-            approximation_source = source_bucket_index
-            
-            # Calculate multiplier based on temperature zones
-            MIDPOINT = 25  # Temperature where usage is minimal
-            source_temp = source_bucket_index
-            target_temp = temperature
-            
-            if target_temp <= MIDPOINT:
-                # Heating zone (0-25°C): usage decreases as temp increases
-                temp_diff = target_temp - source_temp
-                multiplier = max(0.1, 1.0 - (0.20 * temp_diff))
-            else:
-                # Cooling zone (>25°C): first decrease to midpoint, then increase
-                # Calculate what power would be at midpoint
-                temp_diff_to_midpoint = MIDPOINT - source_temp
-                multiplier_at_midpoint = max(0.1, 1.0 - (0.20 * temp_diff_to_midpoint))
-                
-                # Then increase from midpoint
-                temp_diff_from_midpoint = target_temp - MIDPOINT
-                multiplier = multiplier_at_midpoint * (1.0 + (0.20 * temp_diff_from_midpoint))
-            
-            # Apply multiplier to power values
-            power_overall = source_bucket_data.average_power_overall * multiplier
-            power_running = source_bucket_data.average_power_when_running * multiplier
-            duty_cycle = source_bucket_data.duty_cycle_percent
-            data_hours = source_bucket_data.total_time_seconds / 3600
-        else:
-            # Use actual bucket data
-            power_overall = bucket_data.average_power_overall
-            power_running = bucket_data.average_power_when_running
-            duty_cycle = bucket_data.duty_cycle_percent
-            data_hours = bucket_data.total_time_seconds / 3600
-        
-        # Calculate energy for 1 hour
-        energy_kwh = power_overall / 1000.0
-        
-        # Calculate confidence
-        if is_approximated:
-            confidence = "approximated"
-        else:
-            confidence = _calculate_confidence(bucket_data.total_time_seconds)
-        
-        # Build response
+        estimation = _estimate_power_for_temperature(coordinator, temperature)
+
+        energy_kwh = estimation["power_overall_w"] / 1000.0
+
         return {
             "energy_kwh": round(energy_kwh, 3),
-            "power_running_w": round(power_running, 1),
-            "power_overall_w": round(power_overall, 1),
-            "duty_cycle_percent": round(duty_cycle, 2),
-            "temperature_bucket": bucket_index,
-            "confidence": confidence,
-            "approximated": is_approximated,
-            "approximation_source": approximation_source,
-            "data_points_hours": round(data_hours, 2),
+            "power_running_w": round(estimation["power_running_w"], 1),
+            "power_overall_w": round(estimation["power_overall_w"], 1),
+            "duty_cycle_percent": round(estimation["duty_cycle_percent"], 2),
+            "temperature_bucket": estimation["temperature_bucket"],
+            "confidence": estimation["confidence"],
+            "approximated": estimation["approximated"],
+            "approximation_source": estimation["approximation_source"],
+            "data_points_hours": round(estimation["data_points_hours"], 2),
+        }
+
+    async def async_calculate_forecast_energy(call: ServiceCall) -> ServiceResponse:
+        """Calculate energy consumption for a forecast window."""
+
+        starting_hour: int = call.data[ATTR_STARTING_HOUR]
+        hours_ahead: int = call.data[ATTR_HOURS_AHEAD]
+        config_entry_id: str | None = call.data.get(ATTR_CONFIG_ENTRY_ID)
+
+        coordinator = _get_coordinator_for_service(hass, config_entry_id)
+
+        if not coordinator.hourly_forecast:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="forecast_unavailable",
+            )
+
+        now_local = dt_util.as_local(dt_util.utcnow())
+        parsed_forecast: list[tuple[object, dict]] = []
+        for item in coordinator.hourly_forecast:
+            dt_val = dt_util.parse_datetime(item.get("datetime")) if isinstance(item, dict) else None
+            if dt_val is None:
+                continue
+            parsed_forecast.append((dt_util.as_local(dt_val), item))
+
+        parsed_forecast.sort(key=lambda pair: pair[0])
+
+        start_indexes = [idx for idx, (dt_val, _) in enumerate(parsed_forecast) if dt_val >= now_local and dt_val.hour == starting_hour]
+        if not start_indexes:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="forecast_window_too_small",
+            )
+
+        start_index = start_indexes[0]
+        window = parsed_forecast[start_index : start_index + hours_ahead]
+
+        if len(window) < hours_ahead:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="forecast_window_too_small",
+            )
+
+        total_energy_kwh = 0.0
+        hour_details: list[dict[str, object]] = []
+        approximated_hours = 0
+
+        for dt_val, payload in window:
+            temperature = payload.get("temperature") if isinstance(payload, dict) else None
+            if temperature is None:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="forecast_hour_missing",
+                    translation_placeholders={"datetime": dt_val.isoformat()},
+                )
+
+            estimation = _estimate_power_for_temperature(coordinator, float(temperature))
+            energy_kwh = estimation["power_overall_w"] / 1000.0
+            total_energy_kwh += energy_kwh
+            approximated_hours += 1 if estimation["approximated"] else 0
+
+            hour_details.append(
+                {
+                    "datetime": dt_val.isoformat(),
+                    "temperature": float(temperature),
+                    "energy_kwh": round(energy_kwh, 3),
+                    "confidence": estimation["confidence"],
+                    "approximated": estimation["approximated"],
+                    "approximation_source": estimation["approximation_source"],
+                }
+            )
+
+        return {
+            "total_energy_kwh": round(total_energy_kwh, 3),
+            "hours": hour_details,
+            "hours_requested": hours_ahead,
+            "hours_returned": len(hour_details),
+            "approximated_hours": approximated_hours,
+            "starting_hour": starting_hour,
         }
     
     hass.services.async_register(
@@ -186,6 +273,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
         SERVICE_CALCULATE_ENERGY,
         async_calculate_energy,
         schema=SERVICE_CALCULATE_ENERGY_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CALCULATE_FORECAST_ENERGY,
+        async_calculate_forecast_energy,
+        schema=SERVICE_CALCULATE_FORECAST_ENERGY_SCHEMA,
         supports_response=SupportsResponse.ONLY,
     )
 

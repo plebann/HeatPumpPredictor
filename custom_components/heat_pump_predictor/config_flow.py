@@ -17,6 +17,7 @@ from .const import (
     CONF_ENERGY_SENSOR,
     CONF_RUNNING_SENSOR,
     CONF_TEMPERATURE_SENSOR,
+    CONF_WEATHER_ENTITY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -74,6 +75,11 @@ class HeatPumpPredictorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             device_class=SensorDeviceClass.TEMPERATURE,
                         )
                     ),
+                    vol.Required(CONF_WEATHER_ENTITY): selector.EntitySelector(
+                        selector.EntitySelectorConfig(
+                            domain="weather",
+                        )
+                    ),
                 }
             ),
             errors=errors,
@@ -85,6 +91,7 @@ class HeatPumpPredictorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         energy_state = self.hass.states.get(user_input[CONF_ENERGY_SENSOR])
         running_state = self.hass.states.get(user_input[CONF_RUNNING_SENSOR])
         temp_state = self.hass.states.get(user_input[CONF_TEMPERATURE_SENSOR])
+        weather_state = self.hass.states.get(user_input[CONF_WEATHER_ENTITY])
 
         if energy_state is None:
             raise ValueError(f"Energy sensor {user_input[CONF_ENERGY_SENSOR]} not found")
@@ -92,6 +99,8 @@ class HeatPumpPredictorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             raise ValueError(f"Running sensor {user_input[CONF_RUNNING_SENSOR]} not found")
         if temp_state is None:
             raise ValueError(f"Temperature sensor {user_input[CONF_TEMPERATURE_SENSOR]} not found")
+        if weather_state is None:
+            raise ValueError(f"Weather entity {user_input[CONF_WEATHER_ENTITY]} not found")
 
         # Validate entity states are numeric/valid
         try:

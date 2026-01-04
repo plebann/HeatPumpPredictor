@@ -7,7 +7,8 @@
         "data": {
           "energy_sensor": "Energy Sensor",
           "running_sensor": "Running Sensor",
-          "temperature_sensor": "Temperature Sensor"
+          "temperature_sensor": "Temperature Sensor",
+          "weather_entity": "Weather Entity"
         }
       }
     },
@@ -33,6 +34,9 @@
       },
       "duty_cycle": {
         "name": "Duty cycle at {temperature}°C"
+      },
+      "hourly_forecast_cache": {
+        "name": "Hourly forecast cache"
       }
     }
   },
@@ -44,6 +48,24 @@
         "temperature": {
           "name": "Temperature",
           "description": "Outdoor temperature in degrees Celsius"
+        },
+        "config_entry_id": {
+          "name": "Config Entry ID",
+          "description": "Config entry to use (optional if only one exists)"
+        }
+      }
+    },
+    "calculate_forecast_energy": {
+      "name": "Calculate forecast energy consumption",
+      "description": "Calculate predicted energy consumption for a future window using cached hourly forecast.",
+      "fields": {
+        "starting_hour": {
+          "name": "Starting hour",
+          "description": "Local hour (0-23) to begin accumulation"
+        },
+        "hours_ahead": {
+          "name": "Hours ahead",
+          "description": "Number of hours to include (1-24)"
         },
         "config_entry_id": {
           "name": "Config Entry ID",
@@ -67,6 +89,15 @@
     },
     "multiple_config_entries": {
       "message": "Multiple config entries exist. Please specify config_entry_id."
+    },
+    "forecast_unavailable": {
+      "message": "Hourly forecast cache is not available."
+    },
+    "forecast_window_too_small": {
+      "message": "Requested forecast window is not available within the cached hourly data."
+    },
+    "forecast_hour_missing": {
+      "message": "Forecast entry at {datetime} is missing temperature data."
     }
   }
 }

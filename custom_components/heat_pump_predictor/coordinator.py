@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
@@ -32,6 +33,7 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[int, TemperatureBucketData]
         self._unsub_stop_listener = None
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}.{entry.entry_id}")
         self._save_debounce_seconds = 5
+        self.hourly_forecast: list[dict[str, Any]] | None = None
         
         # Create device info
         self.device_info = DeviceInfo(
