@@ -208,7 +208,7 @@ class HeatPumpForecastSensor(SensorEntity):
         try:
             response = await self.hass.services.async_call(
                 "weather",
-                "get_forecast",
+                "get_forecasts",
                 {"entity_id": self._weather_entity, "type": "hourly"},
                 blocking=True,
                 return_response=True,
@@ -219,8 +219,7 @@ class HeatPumpForecastSensor(SensorEntity):
             if not isinstance(forecast, list):
                 forecast = []
 
-            # Limit to 24 entries max
-            self._forecast = forecast[:24]
+            self._forecast = forecast
             self._coordinator.hourly_forecast = self._forecast
             self._attr_native_value = len(self._forecast)
             self.async_write_ha_state()
