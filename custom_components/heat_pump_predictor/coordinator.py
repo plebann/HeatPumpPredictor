@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
@@ -29,8 +29,9 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[int, TemperatureBucketData]
         self._energy_entity = entry.data[CONF_ENERGY_SENSOR]
         self._running_entity = entry.data[CONF_RUNNING_SENSOR]
         self._temperature_entity = entry.data[CONF_TEMPERATURE_SENSOR]
-        self._unsub_state_listener = None
-        self._unsub_stop_listener = None
+        self._unsub_state_listener: Callable[[], None] | None = None
+        self._unsub_stop_listener: Callable[[], None] | None = None
+        self._shutdown = False
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}.{entry.entry_id}")
         self._save_debounce_seconds = 5
         self.hourly_forecast: list[dict[str, Any]] | None = None
@@ -76,13 +77,35 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[int, TemperatureBucketData]
 
     async def async_shutdown(self) -> None:
         # Save data before shutdown
+        if self._shutdown:
+            return
+        self._shutdown = True
+
         await self._save_data()
         _LOGGER.info("Saved heat pump data to storage")
         
-        if self._unsub_state_listener:
+        self._async_unsubscribe_state_listener()
+        self._async_unsubscribe_stop_listener()
+
+    def _async_unsubscribe_state_listener(self) -> None:
+        """Safely remove state change listener."""
+        if not self._unsub_state_listener:
+            return
+        try:
             self._unsub_state_listener()
-        if self._unsub_stop_listener:
+        except ValueError:
+            _LOGGER.debug("State listener already removed during shutdown", exc_info=True)
+        self._unsub_state_listener = None
+
+    def _async_unsubscribe_stop_listener(self) -> None:
+        """Safely remove HA stop listener."""
+        if not self._unsub_stop_listener:
+            return
+        try:
             self._unsub_stop_listener()
+        except ValueError:
+            _LOGGER.debug("Stop listener already removed during shutdown", exc_info=True)
+        self._unsub_stop_listener = None
     
     async def _save_data(self) -> None:
         """Save bucket data to storage."""
