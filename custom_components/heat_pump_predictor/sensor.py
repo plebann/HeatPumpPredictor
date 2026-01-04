@@ -165,6 +165,30 @@ class HeatPumpPerformanceCurveSensor(CoordinatorEntity[HeatPumpCoordinator], Sen
                 })
         return {"data": data}
 
+    def _get_duty_cycle_curve_data(self) -> dict:
+        """Generate duty cycle curve data."""
+        data = []
+        for temp in range(MIN_TEMP, MAX_TEMP + 1):
+            bucket = self.coordinator.data_manager.buckets.get(temp)
+            if bucket and bucket.total_time_seconds > 0:
+                data.append({
+                    "temp": temp,
+                    "duty_cycle": round(bucket.duty_cycle_percent, 2),
+                })
+        return {"data": data}
+
+    def _get_energy_distribution_data(self) -> dict:
+        """Generate energy distribution data."""
+        data = []
+        for temp in range(MIN_TEMP, MAX_TEMP + 1):
+            bucket = self.coordinator.data_manager.buckets.get(temp)
+            if bucket and bucket.total_energy_kwh > 0:
+                data.append({
+                    "temp": temp,
+                    "energy": round(bucket.total_energy_kwh, 2),
+                })
+        return {"data": data}
+
 
 class HeatPumpForecastSensor(SensorEntity):
     """Sensor that caches hourly weather forecast for downstream calculations."""
@@ -215,7 +239,8 @@ class HeatPumpForecastSensor(SensorEntity):
             )
             forecast: list[dict[str, Any]] = []
             if isinstance(response, dict):
-                forecast = response.get("forecast") or response.get("data") or []
+                entity_block = response.get(self._weather_entity) or {}
+                forecast = entity_block.get("forecast") or entity_block.get("data") or []
             if not isinstance(forecast, list):
                 forecast = []
 
@@ -234,27 +259,3 @@ class HeatPumpForecastSensor(SensorEntity):
             "last_updated": dt_util.utcnow().isoformat(),
             "weather_entity": self._weather_entity,
         }
-    
-    def _get_duty_cycle_curve_data(self) -> dict:
-        """Generate duty cycle curve data."""
-        data = []
-        for temp in range(MIN_TEMP, MAX_TEMP + 1):
-            bucket = self.coordinator.data_manager.buckets.get(temp)
-            if bucket and bucket.total_time_seconds > 0:
-                data.append({
-                    "temp": temp,
-                    "duty_cycle": round(bucket.duty_cycle_percent, 2),
-                })
-        return {"data": data}
-    
-    def _get_energy_distribution_data(self) -> dict:
-        """Generate energy distribution data."""
-        data = []
-        for temp in range(MIN_TEMP, MAX_TEMP + 1):
-            bucket = self.coordinator.data_manager.buckets.get(temp)
-            if bucket and bucket.total_energy_kwh > 0:
-                data.append({
-                    "temp": temp,
-                    "energy": round(bucket.total_energy_kwh, 2),
-                })
-        return {"data": data}
