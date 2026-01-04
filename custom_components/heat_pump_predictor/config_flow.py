@@ -28,6 +28,56 @@ class HeatPumpPredictorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+
+
+class HeatPumpPredictorOptionsFlow(config_entries.OptionsFlow):
+    """Handle options flow to reconfigure weather entity."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+        self._errors: dict[str, str] = {}
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle options flow start."""
+        self._errors = {}
+
+        if user_input is not None:
+            weather_state = self.hass.states.get(user_input[CONF_WEATHER_ENTITY])
+            if weather_state is None:
+                self._errors["base"] = "invalid_entity"
+            else:
+                return self.async_create_entry(title="Heat Pump Predictor options", data=user_input)
+
+        current_weather = (
+            self.config_entry.options.get(CONF_WEATHER_ENTITY)
+            or self.config_entry.data.get(CONF_WEATHER_ENTITY)
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_WEATHER_ENTITY,
+                        default=current_weather,
+                    ): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="weather")
+                    ),
+                }
+            ),
+            errors=self._errors,
+        )
+
+
+async def async_get_options_flow(
+    config_entry: config_entries.ConfigEntry,
+) -> HeatPumpPredictorOptionsFlow:
+    """Get the options flow handler."""
+
+    return HeatPumpPredictorOptionsFlow(config_entry)
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:

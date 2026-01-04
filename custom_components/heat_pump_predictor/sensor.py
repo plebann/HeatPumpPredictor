@@ -34,10 +34,30 @@ class HeatPumpSensorEntityDescription(SensorEntityDescription):
     value_fn: Callable[[TemperatureBucketData], float | None] = None
     bucket_temp: int = 0
 
+
+def _resolve_weather_entity(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
+    """Resolve the weather entity to use, with a safe fallback for legacy entries."""
+    if weather_entity := entry.options.get(CONF_WEATHER_ENTITY) or entry.data.get(CONF_WEATHER_ENTITY):
+        return weather_entity
+
+    weather_entities = hass.states.async_entity_ids("weather")
+    if len(weather_entities) == 1:
+        fallback = weather_entities[0]
+        _LOGGER.warning(
+            "Weather entity not configured; falling back to detected weather entity: %s",
+            fallback,
+        )
+        return fallback
+
+    _LOGGER.error(
+        "Weather entity not configured and auto-detect failed; re-run the config flow to select a weather entity"
+    )
+    return None
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: HeatPumpCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities = []
-    weather_entity = entry.data.get(CONF_WEATHER_ENTITY)
+    weather_entity = _resolve_weather_entity(hass, entry)
     if weather_entity:
         entities.append(
             HeatPumpForecastSensor(
@@ -46,8 +66,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 weather_entity,
             )
         )
-    else:
-        _LOGGER.error("Weather entity not configured; forecast cache sensor will not be created")
     for temp in range(MIN_TEMP, MAX_TEMP + 1):
         entities.extend([
             HeatPumpSensor(coordinator, HeatPumpSensorEntityDescription(
