@@ -8,7 +8,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.components.sensor import SensorDeviceClass
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
@@ -109,6 +109,15 @@ class HeatPumpPredictorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             raise ValueError("Running sensor must be a binary sensor (on/off)")
 
 
+@staticmethod
+@callback
+def async_get_options_flow(
+    config_entry: config_entries.ConfigEntry,
+) -> config_entries.OptionsFlow:
+    """Get the options flow handler."""
+    return HeatPumpPredictorOptionsFlow(config_entry)
+
+
 class HeatPumpPredictorOptionsFlow(config_entries.OptionsFlow):
     """Handle options flow to reconfigure weather entity."""
 
@@ -130,44 +139,34 @@ class HeatPumpPredictorOptionsFlow(config_entries.OptionsFlow):
             else:
                 return self.async_create_entry(title="Heat Pump Predictor options", data=user_input)
 
-        current_weather = (
-            self.config_entry.options.get(CONF_WEATHER_ENTITY)
-            or self.config_entry.data.get(CONF_WEATHER_ENTITY)
+            self.hass.config_entries.async_update_entry(
+                    self._config_entry, data={**self._config_entry.data, **user_input}
+                )
+            return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(step_id="init", data_schema=self._get_options_schema())
+    
+    def _get_options_schema(self) -> vol.Schema:
+        """Get options schema with all parameters for calculate_usable_capacity."""
+        return vol.Schema(
+            {
+                vol.Required(CONF_ENERGY_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class=SensorDeviceClass.ENERGY,
+                    )
+                ),
+                vol.Required(CONF_RUNNING_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="binary_sensor")
+                ),
+                vol.Required(CONF_TEMPERATURE_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class=SensorDeviceClass.TEMPERATURE,
+                    )
+                ),
+                vol.Required(CONF_WEATHER_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="weather")
+                ),
+            }
         )
-
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_ENERGY_SENSOR): selector.EntitySelector(
-                        selector.EntitySelectorConfig(
-                            domain="sensor",
-                            device_class=SensorDeviceClass.ENERGY,
-                        )
-                    ),
-                    vol.Required(CONF_RUNNING_SENSOR): selector.EntitySelector(
-                        selector.EntitySelectorConfig(domain="binary_sensor")
-                    ),
-                    vol.Required(CONF_TEMPERATURE_SENSOR): selector.EntitySelector(
-                        selector.EntitySelectorConfig(
-                            domain="sensor",
-                            device_class=SensorDeviceClass.TEMPERATURE,
-                        )
-                    ),
-                    vol.Required(CONF_WEATHER_ENTITY): selector.EntitySelector(
-                        selector.EntitySelectorConfig(domain="weather")
-                    ),
-                }
-            ),
-            errors=self._errors,
-        )
-
-
-@staticmethod
-@callback
-def async_get_options_flow(
-    config_entry: config_entries.ConfigEntry,
-) -> config_entries.OptionsFlow:
-    """Get the options flow handler."""
-
-    return HeatPumpPredictorOptionsFlow(config_entry)
