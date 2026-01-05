@@ -122,7 +122,8 @@ class HeatPumpPredictorOptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
-        super().__init__(config_entry)
+        # OptionsFlow exposes config_entry as a read-only property backed by _config_entry.
+        self._config_entry = config_entry
         self._errors: dict[str, str] = {}
 
     async def async_step_init(
