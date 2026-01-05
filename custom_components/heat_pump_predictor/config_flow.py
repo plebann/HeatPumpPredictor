@@ -108,14 +108,13 @@ class HeatPumpPredictorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if running_state.state not in ("on", "off"):
             raise ValueError("Running sensor must be a binary sensor (on/off)")
 
-
-@staticmethod
-@callback
-def async_get_options_flow(
-    config_entry: config_entries.ConfigEntry,
-) -> config_entries.OptionsFlow:
-    """Get the options flow handler."""
-    return HeatPumpPredictorOptionsFlow(config_entry)
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Get the options flow handler."""
+        return HeatPumpPredictorOptionsFlow(config_entry)
 
 
 class HeatPumpPredictorOptionsFlow(config_entries.OptionsFlow):
@@ -133,39 +132,79 @@ class HeatPumpPredictorOptionsFlow(config_entries.OptionsFlow):
         self._errors = {}
 
         if user_input is not None:
-            weather_state = self.hass.states.get(user_input[CONF_WEATHER_ENTITY])
-            if weather_state is None:
-                self._errors["base"] = "invalid_entity"
-            else:
-                return self.async_create_entry(title="Heat Pump Predictor options", data=user_input)
+            self._errors = self._validate_entities(user_input)
+            if not self._errors:
+                return self.async_create_entry(title="", data=user_input)
 
-            self.hass.config_entries.async_update_entry(
-                    self._config_entry, data={**self._config_entry.data, **user_input}
-                )
-            return self.async_create_entry(title="", data={})
+        return self._show_form(user_input)
 
-        return self.async_show_form(step_id="init", data_schema=self._get_options_schema())
-    
-    def _get_options_schema(self) -> vol.Schema:
-        """Get options schema with all parameters for calculate_usable_capacity."""
+    def _validate_entities(self, user_input: dict[str, Any]) -> dict[str, str]:
+        """Validate that all selected entities exist."""
+        errors: dict[str, str] = {}
+
+        entities = [
+            user_input.get(CONF_ENERGY_SENSOR),
+            user_input.get(CONF_RUNNING_SENSOR),
+            user_input.get(CONF_TEMPERATURE_SENSOR),
+            user_input.get(CONF_WEATHER_ENTITY),
+        ]
+
+        if any(entity is None or self.hass.states.get(entity) is None for entity in entities):
+            errors["base"] = "invalid_entity"
+
+        return errors
+
+    def _show_form(self, user_input: dict[str, Any] | None) -> config_entries.FlowResult:
+        """Show the options form with defaults applied."""
+        defaults = self._get_default_values(user_input)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self._get_options_schema(defaults),
+            errors=self._errors,
+        )
+
+    def _get_default_values(self, user_input: dict[str, Any] | None) -> dict[str, Any]:
+        """Resolve defaults from existing config entry data/options and user input."""
+        defaults: dict[str, Any] = {
+            CONF_ENERGY_SENSOR: self.config_entry.options.get(
+                CONF_ENERGY_SENSOR, self.config_entry.data.get(CONF_ENERGY_SENSOR)
+            ),
+            CONF_RUNNING_SENSOR: self.config_entry.options.get(
+                CONF_RUNNING_SENSOR, self.config_entry.data.get(CONF_RUNNING_SENSOR)
+            ),
+            CONF_TEMPERATURE_SENSOR: self.config_entry.options.get(
+                CONF_TEMPERATURE_SENSOR, self.config_entry.data.get(CONF_TEMPERATURE_SENSOR)
+            ),
+            CONF_WEATHER_ENTITY: self.config_entry.options.get(
+                CONF_WEATHER_ENTITY, self.config_entry.data.get(CONF_WEATHER_ENTITY)
+            ),
+        }
+
+        if user_input:
+            defaults.update(user_input)
+
+        return defaults
+
+    def _get_options_schema(self, defaults: dict[str, Any]) -> vol.Schema:
+        """Build the options schema with defaults."""
         return vol.Schema(
             {
-                vol.Required(CONF_ENERGY_SENSOR): selector.EntitySelector(
+                vol.Required(CONF_ENERGY_SENSOR, default=defaults[CONF_ENERGY_SENSOR]): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain="sensor",
                         device_class=SensorDeviceClass.ENERGY,
                     )
                 ),
-                vol.Required(CONF_RUNNING_SENSOR): selector.EntitySelector(
+                vol.Required(CONF_RUNNING_SENSOR, default=defaults[CONF_RUNNING_SENSOR]): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="binary_sensor")
                 ),
-                vol.Required(CONF_TEMPERATURE_SENSOR): selector.EntitySelector(
+                vol.Required(CONF_TEMPERATURE_SENSOR, default=defaults[CONF_TEMPERATURE_SENSOR]): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain="sensor",
                         device_class=SensorDeviceClass.TEMPERATURE,
                     )
                 ),
-                vol.Required(CONF_WEATHER_ENTITY): selector.EntitySelector(
+                vol.Required(CONF_WEATHER_ENTITY, default=defaults[CONF_WEATHER_ENTITY]): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="weather")
                 ),
             }

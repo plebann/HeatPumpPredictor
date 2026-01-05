@@ -385,6 +385,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Forward setup to sensor platform
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    entry.async_on_unload(entry.add_update_listener(async_update_options))
     
     # Set up services (call once, not per entry)
     if not hass.services.has_service(DOMAIN, SERVICE_CALCULATE_ENERGY):
@@ -418,3 +420,8 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload config entry."""
     await async_unload_entry(hass, entry)
     await async_setup_entry(hass, entry)
+
+
+async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options update by reloading the config entry."""
+    await hass.config_entries.async_reload(entry.entry_id)
