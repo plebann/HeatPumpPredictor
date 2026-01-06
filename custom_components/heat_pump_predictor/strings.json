@@ -22,6 +22,26 @@
       "already_configured": "Device is already configured"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Heat Pump Predictor options",
+        "description": "Update the sensors used by Heat Pump Predictor.",
+        "data": {
+          "energy_sensor": "Energy Sensor",
+          "running_sensor": "Running Sensor",
+          "temperature_sensor": "Temperature Sensor",
+          "weather_entity": "Weather Entity"
+        },
+        "data_description": {
+          "energy_sensor": "Cumulative energy sensor (kWh, total_increasing).",
+          "running_sensor": "Binary sensor that is on when the heat pump runs.",
+          "temperature_sensor": "Outdoor temperature sensor in °C (device_class: temperature).",
+          "weather_entity": "Weather entity that provides hourly forecasts for predictions."
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "total_energy": {

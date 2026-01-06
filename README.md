@@ -14,6 +14,7 @@ A Home Assistant custom integration that tracks heat pump performance across dif
 - **Previous-State Attribution**: Accurately attributes energy consumption to the temperature where it occurred
 - **224 Dynamic Sensors**: Creates entities for all temperature/metric combinations
 - **Long-Term Statistics**: Integrates with Home Assistant recorder for historical data
+- **Forecast-Aware**: Caches hourly weather forecast for energy predictions and services
 
 ## Installation
 
@@ -37,13 +38,14 @@ A Home Assistant custom integration that tracks heat pump performance across dif
 1. Go to **Settings** → **Devices & Services**
 2. Click **Add Integration**
 3. Search for "Heat Pump Predictor"
-4. Select three entities:
+4. Select four inputs:
    - **Energy Sensor**: Cumulative energy consumption (kWh)
    - **Running Sensor**: Binary sensor indicating when heat pump is running
    - **Temperature Sensor**: Outdoor temperature sensor (°C)
+  - **Weather Entity**: Weather entity that exposes hourly forecasts (used for predictions)
 5. Click **Submit**
 
-### Required Input Sensors
+### Required Inputs
 
 The integration requires three sensors from your heat pump system:
 
@@ -99,6 +101,20 @@ The integration requires three sensors from your heat pump system:
   - Read from heat pump if it exposes outdoor temp via Modbus/API
   - **Important**: Weather API temps may differ from your actual location - using a sensor near your heat pump gives more accurate results
 
+#### 4. Weather Entity
+- **Type**: `weather` entity
+- **Purpose**: Provides hourly forecast data so the integration can estimate future energy use via the forecast cache sensor and `calculate_forecast_energy` service
+- **Requirements**:
+  - Must support the `weather.get_forecasts` service with `type: hourly`
+  - Should provide hourly temperatures in °C for at least 24–48 hours ahead
+  - Must be available in Home Assistant (not `unavailable`/`unknown`)
+- **Examples**:
+  - `weather.home`
+  - `weather.openweathermap`
+  - `weather.met_no`
+  - Any other provider that exposes hourly forecasts
+- **How to get**: Add a weather integration that offers hourly forecasts (e.g., Met.no, OpenWeatherMap, NWS) and pick its weather entity during setup
+
 ## Usage
 
 After configuration, the integration creates:
@@ -136,6 +152,41 @@ The integration automatically creates three sensors with chart-ready data:
 - **Use**: Determine which temperatures cost you the most to heat
 
 These sensors update automatically whenever bucket data changes and only include temperatures with actual data.
+
+### Weather forecast refresh
+
+- The hourly forecast cache sensor pulls the selected weather entity immediately on startup/addition, then every 30 minutes.
+- Reloading the integration or restarting Home Assistant triggers the initial refresh again.
+- To change which weather entity is used, rerun the config/options flow and select the new weather entity.
+
+## Services
+
+Two response-only services expose the predictor calculations without creating extra entities:
+
+- `heat_pump_predictor.calculate_energy`
+  - **Purpose**: Estimate per-hour energy use at a specific outdoor temperature bucket.
+  - **Params**: `temperature` (float, -25 to 30), optional `config_entry_id` when multiple entries exist.
+  - **Returns**: `energy_kwh` (per hour), `power_running_w`, `power_overall_w`, `duty_cycle_percent`, `temperature_bucket`, `confidence` (`high|medium|low|approximated`), `approximated` flag, `approximation_source` (bucket used), `data_points_hours`.
+  - **Notes**: Uses collected bucket data; if none exists for that bucket it falls back to the closest bucket and marks `approximated`.
+
+- `heat_pump_predictor.calculate_forecast_energy`
+  - **Purpose**: Predict energy for an hourly forecast window using the cached weather forecast and bucket models.
+  - **Params**: `starting_hour` (0–23, local), `hours_ahead` (1–48), optional `config_entry_id` when multiple entries exist.
+  - **Returns**: `total_energy_kwh`, per-hour array `hours` with `datetime`, `temperature`, optional `temperature_delta`, `trend_adjustment`, `energy_kwh`, `confidence`, `approximated`, `approximation_source`, plus `hours_requested`, `hours_returned`, `approximated_hours`, `starting_hour`.
+  - **Notes**: Requires the hourly forecast cache sensor to have data; applies a trend adjustment when temperatures rise/fall hour to hour.
+
+### Quick service examples
+
+- Developer Tools → Services → `heat_pump_predictor.calculate_energy`
+  ```yaml
+  temperature: 5
+  ```
+
+- Developer Tools → Services → `heat_pump_predictor.calculate_forecast_energy`
+  ```yaml
+  starting_hour: 6
+  hours_ahead: 12
+  ```
 
 ## Sensor Types Explained
 
@@ -273,171 +324,6 @@ The metrics accumulate over the integration's lifetime, providing increasingly a
 - **Periodic**: 5-minute polling ensures data consistency
 - **Persistence**: Data is saved to disk and survives Home Assistant restarts
 - **Statistics**: Home Assistant recorder integration for 60-day retention
-
-## Visualization
-
-### ApexCharts Integration
-
-The integration provides performance curve sensors designed for easy visualization with [ApexCharts Card](https://github.com/RomRider/apexcharts-card).
-
-#### Power Consumption Curve
-
-Visualize how power consumption varies with outdoor temperature:
-
-```yaml
-type: custom:apexcharts-card
-header:
-  title: Heat Pump Power by Temperature
-  show: true
-graph_span: 1h
-apex_config:
-  chart:
-    height: 350
-  xaxis:
-    type: numeric
-    decimalsInFloat: 0
-    title:
-      text: Temperature (°C)
-  yaxis:
-    - title:
-        text: Power (W)
-series:
-  - entity: sensor.heat_pump_predictor_power_curve
-    attribute: data
-    type: line
-    curve: smooth
-    show:
-      legend_value: false
-    name: Overall Power
-    data_generator: |
-      return entity.attributes.data.map(d => [d.temp, d.power_overall]);
-  - entity: sensor.heat_pump_predictor_power_curve
-    attribute: data
-    type: line
-    curve: smooth
-    show:
-      legend_value: false
-    name: Running Power
-    data_generator: |
-      return entity.attributes.data.map(d => [d.temp, d.power_running]);
-```
-
-**What it shows**: The heat pump's efficiency "sweet spot" and how hard it works at different temperatures.
-
-#### Duty Cycle Analysis
-
-See how often your heat pump runs at each temperature:
-
-```yaml
-type: custom:apexcharts-card
-header:
-  title: Heat Pump Duty Cycle by Temperature
-  show: true
-apex_config:
-  chart:
-    height: 300
-  xaxis:
-    title:
-      text: Temperature (°C)
-  yaxis:
-    title:
-      text: Duty Cycle (%)
-    max: 100
-series:
-  - entity: sensor.heat_pump_predictor_duty_cycle_curve
-    attribute: data
-    type: area
-    name: Duty Cycle
-    data_generator: |
-      return entity.attributes.data.map(d => [d.temp, d.duty_cycle]);
-```
-
-**What it shows**: 
-- High duty cycle (>80%) = heat pump struggles, runs constantly
-- Low duty cycle (<30%) = comfortable operating conditions
-- 100% = heat pump undersized or extremely cold
-
-#### Energy Cost Analysis
-
-Identify which temperatures cost the most to heat:
-
-```yaml
-type: custom:apexcharts-card
-header:
-  title: Energy Consumed by Temperature
-  show: true
-apex_config:
-  chart:
-    type: bar
-    height: 300
-  xaxis:
-    title:
-      text: Temperature (°C)
-  yaxis:
-    title:
-      text: Energy (kWh)
-series:
-  - entity: sensor.heat_pump_predictor_energy_distribution
-    attribute: data
-    name: Energy Consumed
-    data_generator: |
-      return entity.attributes.data.map(d => [d.temp, d.energy]);
-```
-
-**What it shows**: Which temperatures account for most of your heating costs. Useful for:
-- Understanding seasonal energy usage patterns
-- Identifying optimization opportunities
-- Predicting heating costs based on weather forecasts
-
-### Dashboard Example
-
-Create a comprehensive heat pump analysis dashboard:
-
-```yaml
-type: vertical-stack
-cards:
-  # Current performance at outdoor temperature
-  - type: entities
-    title: Current Performance
-    entities:
-      - entity: sensor.outdoor_temperature
-        name: Outdoor Temperature
-      - type: custom:template-entity-row
-        name: Power Usage Now
-        state: >
-          {% set temp = states('sensor.outdoor_temperature')|round(0,'floor') %}
-          {{ states('sensor.heat_pump_predictor_avg_power_overall_' ~ temp) }} W
-      - type: custom:template-entity-row
-        name: Duty Cycle Now
-        state: >
-          {% set temp = states('sensor.outdoor_temperature')|round(0,'floor') %}
-          {{ states('sensor.heat_pump_predictor_duty_cycle_' ~ temp) }}%
-  
-  # Performance curves
-  - type: custom:apexcharts-card
-    header:
-      title: Power Consumption Curve
-    series:
-      - entity: sensor.heat_pump_predictor_power_curve
-        attribute: data
-        data_generator: |
-          return entity.attributes.data.map(d => [d.temp, d.power_overall]);
-  
-  # Energy distribution
-  - type: custom:apexcharts-card
-    header:
-      title: Energy by Temperature
-    apex_config:
-      chart:
-        type: bar
-    series:
-      - entity: sensor.heat_pump_predictor_energy_distribution
-        attribute: data
-        data_generator: |
-          return entity.attributes.data.map(d => [d.temp, d.energy]);
-```
-
-**Note**: The performance curve sensors automatically update whenever bucket data changes and only include temperatures where actual data has been collected.
 
 ## Troubleshooting
 
