@@ -1,0 +1,124 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Konfiguracja Heat Pump Predictor",
+        "description": "Skonfiguruj czujniki do śledzenia pracy pompy ciepła",
+        "data": {
+          "energy_sensor": "Czujnik energii",
+          "running_sensor": "Czujnik pracy",
+          "temperature_sensor": "Czujnik temperatury",
+          "weather_entity": "Encja pogody"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nie udało się połączyć",
+      "invalid_auth": "Nieprawidłowe uwierzytelnienie",
+      "invalid_entity": "Wybrana encja jest niedostępna. Wybierz inną encję.",
+      "unknown": "Nieoczekiwany błąd"
+    },
+    "abort": {
+      "already_configured": "Urządzenie jest już skonfigurowane"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcje Heat Pump Predictor",
+        "description": "Zaktualizuj czujniki używane przez Heat Pump Predictor.",
+        "data": {
+          "energy_sensor": "Czujnik energii",
+          "running_sensor": "Czujnik pracy",
+          "temperature_sensor": "Czujnik temperatury",
+          "weather_entity": "Encja pogody"
+        },
+        "data_description": {
+          "energy_sensor": "Sumaryczny czujnik energii (kWh, total_increasing).",
+          "running_sensor": "Czujnik binarny w stanie on, gdy pompa pracuje.",
+          "temperature_sensor": "Zewnętrzny czujnik temperatury w °C (device_class: temperature).",
+          "weather_entity": "Encja pogody z godzinową prognozą do predykcji."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "total_energy": {
+        "name": "Energia przy {temperature}°C"
+      },
+      "avg_power_running": {
+        "name": "Moc podczas pracy przy {temperature}°C"
+      },
+      "avg_power_overall": {
+        "name": "Średnia moc przy {temperature}°C"
+      },
+      "duty_cycle": {
+        "name": "Cykl pracy przy {temperature}°C"
+      },
+      "hourly_forecast_cache": {
+        "name": "Bufor prognozy godzinowej"
+      }
+    }
+  },
+  "services": {
+    "calculate_energy": {
+      "name": "Oblicz zużycie energii",
+      "description": "Oblicz przewidywane zużycie energii dla podanej temperatury przez 1 godzinę.",
+      "fields": {
+        "temperature": {
+          "name": "Temperatura",
+          "description": "Temperatura zewnętrzna w stopniach Celsjusza"
+        },
+        "config_entry_id": {
+          "name": "ID wpisu konfiguracji",
+          "description": "Wpis konfiguracji (opcjonalnie, gdy jest więcej niż jeden)"
+        }
+      }
+    },
+    "calculate_forecast_energy": {
+      "name": "Oblicz zużycie z prognozy",
+      "description": "Oblicz przewidywane zużycie energii dla przyszłego przedziału czasu, korzystając z bufora prognozy godzinowej.",
+      "fields": {
+        "starting_hour": {
+          "name": "Godzina startu",
+          "description": "Lokalna godzina (0-23), od której rozpocząć obliczenia"
+        },
+        "hours_ahead": {
+          "name": "Liczba godzin",
+          "description": "Liczba godzin do uwzględnienia (1-48)"
+        },
+        "config_entry_id": {
+          "name": "ID wpisu konfiguracji",
+          "description": "Wpis konfiguracji (opcjonalnie, gdy jest więcej niż jeden)"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "insufficient_data": {
+      "message": "Brak danych dla temperatury {temperature}°C (koszyk {bucket}). Poczekaj na zebrane dane."
+    },
+    "no_data_for_approximation": {
+      "message": "Brak danych dla temperatury {temperature}°C i brak koszyków z danymi do przybliżenia."
+    },
+    "invalid_config_entry": {
+      "message": "Wpis konfiguracji {config_entry} nie został znaleziony."
+    },
+    "integration_not_setup": {
+      "message": "Integracja Heat Pump Predictor nie jest skonfigurowana."
+    },
+    "multiple_config_entries": {
+      "message": "Istnieje wiele wpisów konfiguracji. Podaj config_entry_id."
+    },
+    "forecast_unavailable": {
+      "message": "Bufor prognozy godzinowej jest niedostępny."
+    },
+    "forecast_window_too_small": {
+      "message": "Żądany przedział prognozy nie mieści się w buforze danych."
+    },
+    "forecast_hour_missing": {
+      "message": "Brak danych prognozy o {datetime}."
+    }
+  }
+}

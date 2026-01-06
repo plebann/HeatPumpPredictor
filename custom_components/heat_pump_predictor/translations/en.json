@@ -1,0 +1,124 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Heat Pump Predictor",
+        "description": "Configure sensors to track heat pump performance",
+        "data": {
+          "energy_sensor": "Energy Sensor",
+          "running_sensor": "Running Sensor",
+          "temperature_sensor": "Temperature Sensor",
+          "weather_entity": "Weather Entity"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "invalid_entity": "Selected entity is not available. Please choose another entity.",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Heat Pump Predictor options",
+        "description": "Update the sensors used by Heat Pump Predictor.",
+        "data": {
+          "energy_sensor": "Energy Sensor",
+          "running_sensor": "Running Sensor",
+          "temperature_sensor": "Temperature Sensor",
+          "weather_entity": "Weather Entity"
+        },
+        "data_description": {
+          "energy_sensor": "Cumulative energy sensor (kWh, total_increasing).",
+          "running_sensor": "Binary sensor that is on when the heat pump runs.",
+          "temperature_sensor": "Outdoor temperature sensor in °C (device_class: temperature).",
+          "weather_entity": "Weather entity that provides hourly forecasts for predictions."
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "total_energy": {
+        "name": "Energy at {temperature}°C"
+      },
+      "avg_power_running": {
+        "name": "Running power at {temperature}°C"
+      },
+      "avg_power_overall": {
+        "name": "Overall power at {temperature}°C"
+      },
+      "duty_cycle": {
+        "name": "Duty cycle at {temperature}°C"
+      },
+      "hourly_forecast_cache": {
+        "name": "Hourly forecast cache"
+      }
+    }
+  },
+  "services": {
+    "calculate_energy": {
+      "name": "Calculate energy consumption",
+      "description": "Calculate predicted energy consumption for a given temperature for 1 hour.",
+      "fields": {
+        "temperature": {
+          "name": "Temperature",
+          "description": "Outdoor temperature in degrees Celsius"
+        },
+        "config_entry_id": {
+          "name": "Config Entry ID",
+          "description": "Config entry to use (optional if only one exists)"
+        }
+      }
+    },
+    "calculate_forecast_energy": {
+      "name": "Calculate forecast energy consumption",
+      "description": "Calculate predicted energy consumption for a future window using cached hourly forecast.",
+      "fields": {
+        "starting_hour": {
+          "name": "Starting hour",
+          "description": "Local hour (0-23) to begin accumulation"
+        },
+        "hours_ahead": {
+          "name": "Hours ahead",
+          "description": "Number of hours to include (1-48)"
+        },
+        "config_entry_id": {
+          "name": "Config Entry ID",
+          "description": "Config entry to use (optional if only one exists)"
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "insufficient_data": {
+      "message": "No data available for temperature {temperature}°C (bucket {bucket}). Please wait for more data to be collected."
+    },
+    "no_data_for_approximation": {
+      "message": "No data available for temperature {temperature}°C and no data found in any bucket for approximation."
+    },
+    "invalid_config_entry": {
+      "message": "Config entry {config_entry} not found."
+    },
+    "integration_not_setup": {
+      "message": "Heat Pump Predictor integration is not set up."
+    },
+    "multiple_config_entries": {
+      "message": "Multiple config entries exist. Please specify config_entry_id."
+    },
+    "forecast_unavailable": {
+      "message": "Hourly forecast cache is not available."
+    },
+    "forecast_window_too_small": {
+      "message": "Requested forecast window is not available within the cached hourly data."
+    },
+    "forecast_hour_missing": {
+      "message": "Forecast entry at {datetime} is missing temperature data."
+    }
+  }
+}
