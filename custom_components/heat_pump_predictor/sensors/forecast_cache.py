@@ -11,6 +11,7 @@ from homeassistant.helpers.event import async_track_time_interval
 
 from ..coordinator import HeatPumpCoordinator
 from ..shared_base import HeatPumpBaseEntity
+from ..const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class HeatPumpForecastSensor(HeatPumpBaseEntity, SensorEntity):
         self.hass = hass
         self._weather_entity = weather_entity
         self._unsub_refresh = None
-        self._attr_suggested_object_id = "hourly_forecast_cache"
+        self._attr_suggested_object_id = f"{DOMAIN}_hourly_forecast_cache"
 
     async def async_added_to_hass(self) -> None:
         await self._async_update_forecast()

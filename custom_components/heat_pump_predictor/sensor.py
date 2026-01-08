@@ -80,14 +80,14 @@ def _build_scheduled_forecast_entities(
 
     schedules = [
         {
-            "unique_id": "scheduled_forecast_6h",
+            "unique_id": "scheduled_forecast_6_00",
             "translation_key": "scheduled_forecast_morning",
             "schedule": (4, 0, 0),
             "starting_hour": 6,
             "hours_ahead": 7,
         },
         {
-            "unique_id": "scheduled_forecast_15h",
+            "unique_id": "scheduled_forecast_15_00",
             "translation_key": "scheduled_forecast_afternoon",
             "schedule": (13, 0, 0),
             "starting_hour": 15,

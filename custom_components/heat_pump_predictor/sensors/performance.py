@@ -6,6 +6,7 @@ from homeassistant.components.sensor import SensorEntity
 from ..const import MAX_TEMP, MIN_TEMP
 from ..coordinator import HeatPumpCoordinator
 from ..shared_base import HeatPumpBaseEntity
+from ..const import DOMAIN
 
 
 class HeatPumpPerformanceCurveSensor(HeatPumpBaseEntity, SensorEntity):
@@ -16,7 +17,7 @@ class HeatPumpPerformanceCurveSensor(HeatPumpBaseEntity, SensorEntity):
     def __init__(self, coordinator: HeatPumpCoordinator, key: str, translation_key: str) -> None:
         super().__init__(coordinator, unique_id=key, translation_key=translation_key)
         self._key = key
-        self._attr_suggested_object_id = key
+        self._attr_suggested_object_id = f"{DOMAIN}_{key}"
 
     @property
     def native_value(self) -> str:
