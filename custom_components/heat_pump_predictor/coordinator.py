@@ -1,6 +1,7 @@
 ﻿"""Coordinator for Heat Pump Predictor integration."""
 from __future__ import annotations
 
+from datetime import timedelta
 import logging
 from typing import Any, Callable
 
@@ -212,7 +213,35 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         hour_details: list[dict[str, Any]] = []
         approximated_hours = 0
 
-        previous_temp: float | None = current_temperature
+        window_start_dt = parsed_forecast[start_index][0]
+        next_hour_start = now_local.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+
+        if window_start_dt == next_hour_start:
+            previous_temp: float | None = current_temperature
+        else:
+            if start_index == 0:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="forecast_window_too_small",
+                )
+
+            prev_dt, prev_payload = parsed_forecast[start_index - 1]
+            prev_temp_raw = prev_payload.get("temperature") if isinstance(prev_payload, dict) else None
+            if prev_temp_raw is None:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="forecast_hour_missing",
+                    translation_placeholders={"datetime": prev_dt.isoformat()},
+                )
+
+            try:
+                previous_temp = float(prev_temp_raw)
+            except (TypeError, ValueError) as err:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="forecast_hour_missing",
+                    translation_placeholders={"datetime": prev_dt.isoformat()},
+                ) from err
 
         for dt_val, payload in window:
             temperature = payload.get("temperature") if isinstance(payload, dict) else None
