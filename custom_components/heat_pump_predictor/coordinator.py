@@ -42,7 +42,6 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Create device info
         self.device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
-            name="Heat Pump Predictor",
             manufacturer="Heat Pump Predictor",
             model="Analytics",
             entry_type=None,

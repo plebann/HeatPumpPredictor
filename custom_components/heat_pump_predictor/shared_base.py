@@ -14,7 +14,7 @@ if TYPE_CHECKING:  # pragma: no cover
 class HeatPumpBaseEntity(CoordinatorEntity["HeatPumpCoordinator"]):
     """Common base for all entities in the integration."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
 
     def __init__(
         self,
