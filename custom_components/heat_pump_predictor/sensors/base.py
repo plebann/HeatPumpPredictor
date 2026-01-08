@@ -37,6 +37,8 @@ class HeatPumpSensorBase(HeatPumpBaseEntity, SensorEntity, Generic[TDescription]
             translation_placeholders=description.translation_placeholders,
         )
         self.entity_description = description
+        # Ensure deterministic entity_id even if translation fails at creation time
+        self._attr_suggested_object_id = description.key
 
     def _get_bucket(self) -> TemperatureBucketData | None:
         """Return bucket data for the described temperature, if any."""

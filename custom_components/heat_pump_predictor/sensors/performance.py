@@ -17,6 +17,7 @@ class HeatPumpPerformanceCurveSensor(HeatPumpBaseEntity, SensorEntity):
         super().__init__(coordinator, unique_id=key)
         self._attr_name = name
         self._key = key
+        self._attr_suggested_object_id = key
 
     @property
     def native_value(self) -> str:

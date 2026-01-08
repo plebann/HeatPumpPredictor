@@ -58,6 +58,7 @@ class ScheduledForecastEnergySensor(HeatPumpBaseEntity, SensorEntity):
             "hours_ahead": hours_ahead,
             "hours": [],
         }
+        self._attr_suggested_object_id = unique_id
 
     async def async_added_to_hass(self) -> None:
         """Register schedule and perform initial calculation."""
