@@ -45,28 +45,28 @@
   "entity": {
     "sensor": {
       "total_energy": {
-        "name": "Energy at {temperature}°C"
+        "name": "Energy {temperature}°C"
       },
       "avg_power_running": {
-        "name": "Running power at {temperature}°C"
+        "name": "Power {temperature}°C"
       },
       "avg_power_overall": {
-        "name": "Overall power at {temperature}°C"
+        "name": "Overall power {temperature}°C"
       },
       "duty_cycle": {
-        "name": "Duty cycle at {temperature}°C"
+        "name": "Duty cycle {temperature}°C"
       },
       "hourly_forecast_cache": {
         "name": "Hourly forecast cache"
       },
       "scheduled_forecast_morning": {
-        "name": "Forecast energy (morning window)"
+        "name": "Forecast morning"
       },
       "scheduled_forecast_afternoon": {
-        "name": "Forecast energy (afternoon window)"
+        "name": "Forecast afternoon"
       },
       "scheduled_forecast_daily": {
-        "name": "Forecast energy (daily window)"
+        "name": "Forecast daily"
       },
       "performance_power_curve": {
         "name": "Power curve"

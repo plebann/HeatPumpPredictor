@@ -45,28 +45,28 @@
   "entity": {
     "sensor": {
       "total_energy": {
-        "name": "Energia przy {temperature}°C"
+        "name": "Energia {temperature}°C"
       },
       "avg_power_running": {
-        "name": "Moc podczas pracy przy {temperature}°C"
+        "name": "Moc {temperature}°C"
       },
       "avg_power_overall": {
-        "name": "Średnia moc przy {temperature}°C"
+        "name": "Średnia moc {temperature}°C"
       },
       "duty_cycle": {
-        "name": "Cykl pracy przy {temperature}°C"
+        "name": "Cykl pracy {temperature}°C"
       },
       "hourly_forecast_cache": {
         "name": "Bufor prognozy godzinowej"
       },
       "scheduled_forecast_morning": {
-        "name": "Prognozowane zużycie (okno poranne)"
+        "name": "Prognoza poranna"
       },
       "scheduled_forecast_afternoon": {
-        "name": "Prognozowane zużycie (okno popołudniowe)"
+        "name": "Prognoza popołudniowa"
       },
       "scheduled_forecast_daily": {
-        "name": "Prognozowane zużycie (okno dobowe)"
+        "name": "Prognoza dobowa"
       },
       "performance_power_curve": {
         "name": "Krzywa mocy"
