@@ -15,7 +15,6 @@ class HeatPumpBaseEntity(CoordinatorEntity["HeatPumpCoordinator"]):
     """Common base for all entities in the integration."""
 
     _attr_has_entity_name = True
-    _attr_name = None
 
     def __init__(
         self,
