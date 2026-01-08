@@ -18,6 +18,7 @@ class HeatPumpSensorEntityDescription(SensorEntityDescription):
 
     value_fn: BucketValueFn | None = None
     bucket_temp: int | None = None
+    translation_placeholders: dict[str, str] | None = None
 
 
 TDescription = TypeVar("TDescription", bound=HeatPumpSensorEntityDescription)
@@ -29,7 +30,12 @@ class HeatPumpSensorBase(HeatPumpBaseEntity, SensorEntity, Generic[TDescription]
     entity_description: TDescription
 
     def __init__(self, coordinator, description: TDescription) -> None:
-        super().__init__(coordinator, description.key, translation_key=description.translation_key)
+        super().__init__(
+            coordinator,
+            description.key,
+            translation_key=description.translation_key,
+            translation_placeholders=description.translation_placeholders,
+        )
         self.entity_description = description
 
     def _get_bucket(self) -> TemperatureBucketData | None:

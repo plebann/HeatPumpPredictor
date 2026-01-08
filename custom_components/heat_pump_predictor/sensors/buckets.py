@@ -63,6 +63,7 @@ def build_bucket_sensors(coordinator: HeatPumpCoordinator) -> Iterable[HeatPumpS
             HeatPumpSensorEntityDescription(
                 key=f"total_energy_{temp}",
                 translation_key=TRANSLATION_KEY_ENERGY,
+                translation_placeholders={"temperature": str(temp)},
                 bucket_temp=temp,
                 device_class=SensorDeviceClass.ENERGY,
                 native_unit_of_measurement="kWh",
@@ -78,6 +79,7 @@ def build_bucket_sensors(coordinator: HeatPumpCoordinator) -> Iterable[HeatPumpS
             HeatPumpSensorEntityDescription(
                 key=f"avg_power_running_{temp}",
                 translation_key=TRANSLATION_KEY_AVG_POWER_RUNNING,
+                translation_placeholders={"temperature": str(temp)},
                 bucket_temp=temp,
                 device_class=SensorDeviceClass.POWER,
                 native_unit_of_measurement="W",
@@ -93,6 +95,7 @@ def build_bucket_sensors(coordinator: HeatPumpCoordinator) -> Iterable[HeatPumpS
             HeatPumpSensorEntityDescription(
                 key=f"avg_power_overall_{temp}",
                 translation_key=TRANSLATION_KEY_AVG_POWER_OVERALL,
+                translation_placeholders={"temperature": str(temp)},
                 bucket_temp=temp,
                 device_class=SensorDeviceClass.POWER,
                 native_unit_of_measurement="W",
@@ -108,6 +111,7 @@ def build_bucket_sensors(coordinator: HeatPumpCoordinator) -> Iterable[HeatPumpS
             HeatPumpSensorEntityDescription(
                 key=f"duty_cycle_{temp}",
                 translation_key=TRANSLATION_KEY_DUTY_CYCLE,
+                translation_placeholders={"temperature": str(temp)},
                 bucket_temp=temp,
                 native_unit_of_measurement="%",
                 state_class=SensorStateClass.MEASUREMENT,
