@@ -58,9 +58,9 @@ async def async_setup_entry(
 
     entities.extend(
         [
-            HeatPumpPerformanceCurveSensor(coordinator, "power_curve", "Power Curve"),
-            HeatPumpPerformanceCurveSensor(coordinator, "duty_cycle_curve", "Duty Cycle Curve"),
-            HeatPumpPerformanceCurveSensor(coordinator, "energy_distribution", "Energy Distribution"),
+            HeatPumpPerformanceCurveSensor(coordinator, "power_curve", "performance_power_curve"),
+            HeatPumpPerformanceCurveSensor(coordinator, "duty_cycle_curve", "performance_duty_cycle_curve"),
+            HeatPumpPerformanceCurveSensor(coordinator, "energy_distribution", "performance_energy_distribution"),
         ]
     )
 

@@ -9,13 +9,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.event import async_track_time_change
 
-from ..const import (
-    ATTR_CONFIG_ENTRY_ID,
-    ATTR_HOURS_AHEAD,
-    ATTR_STARTING_HOUR,
-    DOMAIN,
-    SERVICE_CALCULATE_FORECAST_ENERGY,
-)
+from ..const import CONF_TEMPERATURE_SENSOR, DOMAIN
 from ..shared_base import HeatPumpBaseEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -87,26 +81,12 @@ class ScheduledForecastEnergySensor(HeatPumpBaseEntity, SensorEntity):
     async def _async_update_forecast_energy(self) -> None:
         """Call forecast energy service and update state."""
 
-        call_data = {
-            ATTR_STARTING_HOUR: self._starting_hour,
-            ATTR_HOURS_AHEAD: self._hours_ahead,
-            ATTR_CONFIG_ENTRY_ID: self.coordinator.config_entry.entry_id,
-        }
-
         try:
-            response = await self.hass.services.async_call(
-                DOMAIN,
-                SERVICE_CALCULATE_FORECAST_ENERGY,
-                call_data,
-                blocking=True,
-                return_response=True,
+            response = await self.coordinator.async_calculate_forecast_energy(
+                starting_hour=self._starting_hour,
+                hours_ahead=self._hours_ahead,
+                current_temperature=self._get_current_temperature(),
             )
-
-            if not isinstance(response, dict):
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="forecast_unavailable",
-                )
 
             self._attr_available = True
             self._attr_native_value = response.get("total_energy_kwh")
@@ -120,6 +100,21 @@ class ScheduledForecastEnergySensor(HeatPumpBaseEntity, SensorEntity):
             self._attr_available = False
             _LOGGER.warning("Scheduled forecast update failed: %s", err)
             self.async_write_ha_state()
+
+    def _get_current_temperature(self) -> float | None:
+        """Best-effort current temperature for trend adjustment seed."""
+        temp_entity = self.coordinator.config_entry.data.get(CONF_TEMPERATURE_SENSOR)
+        if not temp_entity:
+            return None
+
+        state = self.hass.states.get(temp_entity)
+        if state is None:
+            return None
+
+        try:
+            return float(state.state)
+        except (ValueError, TypeError):
+            return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

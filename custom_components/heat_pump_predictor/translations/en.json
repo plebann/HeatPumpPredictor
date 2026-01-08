@@ -67,6 +67,15 @@
       },
       "scheduled_forecast_daily": {
         "name": "Forecast energy (daily window)"
+      },
+      "performance_power_curve": {
+        "name": "Power curve"
+      },
+      "performance_duty_cycle_curve": {
+        "name": "Duty cycle curve"
+      },
+      "performance_energy_distribution": {
+        "name": "Energy distribution"
       }
     }
   },

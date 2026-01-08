@@ -8,7 +8,6 @@ from typing import Any
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.util import dt as dt_util
 
 from ..coordinator import HeatPumpCoordinator
 from ..shared_base import HeatPumpBaseEntity
@@ -27,7 +26,6 @@ class HeatPumpForecastSensor(HeatPumpBaseEntity, SensorEntity):
         super().__init__(coordinator, unique_id="hourly_forecast", translation_key="hourly_forecast_cache")
         self.hass = hass
         self._weather_entity = weather_entity
-        self._forecast: list[dict[str, Any]] = []
         self._unsub_refresh = None
         self._attr_suggested_object_id = "hourly_forecast_cache"
 
@@ -47,23 +45,9 @@ class HeatPumpForecastSensor(HeatPumpBaseEntity, SensorEntity):
 
     async def _async_update_forecast(self) -> None:
         try:
-            response = await self.hass.services.async_call(
-                "weather",
-                "get_forecasts",
-                {"entity_id": self._weather_entity, "type": "hourly"},
-                blocking=True,
-                return_response=True,
-            )
-            forecast: list[dict[str, Any]] = []
-            if isinstance(response, dict):
-                entity_block = response.get(self._weather_entity) or {}
-                forecast = entity_block.get("forecast") or entity_block.get("data") or []
-            if not isinstance(forecast, list):
-                forecast = []
-
-            self._forecast = forecast
-            self.coordinator.hourly_forecast = self._forecast
-            self._attr_native_value = len(self._forecast)
+            forecast = await self.coordinator.async_refresh_forecast(self._weather_entity)
+            self._attr_available = True
+            self._attr_native_value = len(forecast)
             self.async_write_ha_state()
         except Exception as err:  # pylint: disable=broad-except
             # Leave last cached forecast to avoid breaking dependent services.
@@ -74,7 +58,6 @@ class HeatPumpForecastSensor(HeatPumpBaseEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
-            "forecast": self._forecast,
-            "last_updated": dt_util.utcnow().isoformat(),
+            "forecast": self.coordinator.forecast,
             "weather_entity": self._weather_entity,
         }

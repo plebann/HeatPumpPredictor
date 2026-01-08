@@ -36,6 +36,8 @@ class HeatPumpBaseEntity(CoordinatorEntity["HeatPumpCoordinator"]):
     @property
     def available(self) -> bool:
         """Return entity availability based on coordinator state."""
+        if getattr(self, "_attr_available", None) is False:
+            return False
         return bool(self.coordinator.last_update_success)
 
     @property

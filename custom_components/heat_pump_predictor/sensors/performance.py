@@ -13,9 +13,8 @@ class HeatPumpPerformanceCurveSensor(HeatPumpBaseEntity, SensorEntity):
 
     _attr_icon = "mdi:chart-bell-curve"
 
-    def __init__(self, coordinator: HeatPumpCoordinator, key: str, name: str) -> None:
-        super().__init__(coordinator, unique_id=key)
-        self._attr_name = name
+    def __init__(self, coordinator: HeatPumpCoordinator, key: str, translation_key: str) -> None:
+        super().__init__(coordinator, unique_id=key, translation_key=translation_key)
         self._key = key
         self._attr_suggested_object_id = key
 

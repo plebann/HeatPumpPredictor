@@ -67,6 +67,15 @@
       },
       "scheduled_forecast_daily": {
         "name": "Prognozowane zużycie (okno dobowe)"
+      },
+      "performance_power_curve": {
+        "name": "Krzywa mocy"
+      },
+      "performance_duty_cycle_curve": {
+        "name": "Krzywa cyklu pracy"
+      },
+      "performance_energy_distribution": {
+        "name": "Rozkład zużycia energii"
       }
     }
   },
