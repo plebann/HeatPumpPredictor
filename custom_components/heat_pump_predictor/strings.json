@@ -58,6 +58,15 @@
       },
       "hourly_forecast_cache": {
         "name": "Hourly forecast cache"
+      },
+      "scheduled_forecast_morning": {
+        "name": "Forecast energy (morning window)"
+      },
+      "scheduled_forecast_afternoon": {
+        "name": "Forecast energy (afternoon window)"
+      },
+      "scheduled_forecast_daily": {
+        "name": "Forecast energy (daily window)"
       }
     }
   },

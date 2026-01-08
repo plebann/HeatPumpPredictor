@@ -14,6 +14,7 @@ from .sensors import (
     HeatPumpForecastSensor,
     HeatPumpPerformanceCurveSensor,
     HeatPumpSensorBase,
+    ScheduledForecastEnergySensor,
     build_bucket_sensors,
 )
 
@@ -52,6 +53,10 @@ async def async_setup_entry(
         entities.append(HeatPumpForecastSensor(hass, coordinator, weather_entity))
 
     entities.extend(
+        _build_scheduled_forecast_entities(hass, coordinator)
+    )
+
+    entities.extend(
         [
             HeatPumpPerformanceCurveSensor(coordinator, "power_curve", "Power Curve"),
             HeatPumpPerformanceCurveSensor(coordinator, "duty_cycle_curve", "Duty Cycle Curve"),
@@ -66,3 +71,47 @@ async def async_setup_entry(
 def _build_bucket_entities(coordinator: HeatPumpCoordinator) -> Iterable[HeatPumpSensorBase]:
     """Helper to build all bucket sensors."""
     return build_bucket_sensors(coordinator)
+
+
+def _build_scheduled_forecast_entities(
+    hass: HomeAssistant, coordinator: HeatPumpCoordinator
+) -> Iterable[ScheduledForecastEnergySensor]:
+    """Create scheduled forecast energy sensors."""
+
+    schedules = [
+        {
+            "unique_id": "scheduled_forecast_6h",
+            "translation_key": "scheduled_forecast_morning",
+            "schedule": (4, 0, 0),
+            "starting_hour": 6,
+            "hours_ahead": 7,
+        },
+        {
+            "unique_id": "scheduled_forecast_15h",
+            "translation_key": "scheduled_forecast_afternoon",
+            "schedule": (13, 0, 0),
+            "starting_hour": 15,
+            "hours_ahead": 7,
+        },
+        {
+            "unique_id": "scheduled_forecast_daily",
+            "translation_key": "scheduled_forecast_daily",
+            "schedule": (23, 55, 0),
+            "starting_hour": 0,
+            "hours_ahead": 24,
+        },
+    ]
+
+    for item in schedules:
+        hour, minute, second = item["schedule"]
+        yield ScheduledForecastEnergySensor(
+            hass,
+            coordinator,
+            unique_id=item["unique_id"],
+            translation_key=item["translation_key"],
+            schedule_hour=hour,
+            schedule_minute=minute,
+            schedule_second=second,
+            starting_hour=item["starting_hour"],
+            hours_ahead=item["hours_ahead"],
+        )

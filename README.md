@@ -159,6 +159,16 @@ These sensors update automatically whenever bucket data changes and only include
 - Reloading the integration or restarting Home Assistant triggers the initial refresh again.
 - To change which weather entity is used, rerun the config/options flow and select the new weather entity.
 
+### Scheduled forecast sensors
+
+Three forecast sensors run daily using the cached forecast and store `total_energy_kwh` with detailed `hours` attributes:
+
+- Morning window: runs at 04:00, calculates starting at hour 6 for 7 hours.
+- Afternoon window: runs at 13:00, calculates starting at hour 15 for 7 hours.
+- Daily window: runs at 23:55, calculates starting at hour 0 for 24 hours.
+
+Ensure the hourly forecast cache is available so these sensors remain updated and available.
+
 ## Services
 
 Two response-only services expose the predictor calculations without creating extra entities:

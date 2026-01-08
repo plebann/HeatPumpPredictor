@@ -58,6 +58,15 @@
       },
       "hourly_forecast_cache": {
         "name": "Bufor prognozy godzinowej"
+      },
+      "scheduled_forecast_morning": {
+        "name": "Prognozowane zużycie (okno poranne)"
+      },
+      "scheduled_forecast_afternoon": {
+        "name": "Prognozowane zużycie (okno popołudniowe)"
+      },
+      "scheduled_forecast_daily": {
+        "name": "Prognozowane zużycie (okno dobowe)"
       }
     }
   },
