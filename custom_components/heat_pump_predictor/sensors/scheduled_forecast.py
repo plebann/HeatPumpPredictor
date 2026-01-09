@@ -50,9 +50,7 @@ class ScheduledForecastEnergySensor(HeatPumpBaseEntity, SensorEntity):
         self._last_attributes: dict[str, Any] = {
             "starting_hour": starting_hour,
             "hours_ahead": hours_ahead,
-            "hours": [],
-            "previous": [],
-            "previous_energy_kwh": None,
+            "hours": []
         }
         self._attr_suggested_object_id = f"{DOMAIN}_{unique_id}"
 
@@ -89,17 +87,15 @@ class ScheduledForecastEnergySensor(HeatPumpBaseEntity, SensorEntity):
                 hours_ahead=self._hours_ahead,
                 current_temperature=self._get_current_temperature(),
             )
-            previous_current = self._last_attributes.get("hours")
-            previous_energy = self.native_value
-
+            previous_hours = self._last_attributes.get("hours") or []
+            current_hours = response.get("hours") or []
+            keep = 3 * self._hours_ahead
+            hours = (list(previous_hours) + list(current_hours))[-keep:]
             attributes: dict[str, Any] = {
                 "starting_hour": self._starting_hour,
                 "hours_ahead": self._hours_ahead,
-                "previous": list(previous_current) if isinstance(previous_current, list) else previous_current,
-                "previous_energy_kwh": previous_energy,
+                "hours": hours,
             }
-
-            attributes["hours"] = response.get("hours")
 
             self._attr_available = True
             self._attr_native_value = response.get("total_energy_kwh")
