@@ -4,7 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.components.sensor import RestoreSensor, SensorDeviceClass, SensorStateClass
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.event import async_track_time_change
@@ -15,7 +16,7 @@ from ..shared_base import HeatPumpBaseEntity
 _LOGGER = logging.getLogger(__name__)
 
 
-class ScheduledForecastEnergySensor(HeatPumpBaseEntity, SensorEntity):
+class ScheduledForecastEnergySensor(HeatPumpBaseEntity, RestoreSensor):
     """Sensor that stores forecast energy for a fixed daily window."""
 
     _attr_should_poll = False
@@ -55,7 +56,23 @@ class ScheduledForecastEnergySensor(HeatPumpBaseEntity, SensorEntity):
         self._attr_suggested_object_id = f"{DOMAIN}_{unique_id}"
 
     async def async_added_to_hass(self) -> None:
-        """Register schedule and perform initial calculation."""
+        """Restore state, register schedule, and perform initial calculation."""
+
+        await super().async_added_to_hass()
+
+        if restored_state := await self.async_get_last_state():
+            if restored_state.state not in (STATE_UNKNOWN, STATE_UNAVAILABLE, None):
+                try:
+                    self._attr_native_value = float(restored_state.state)
+                except (ValueError, TypeError):
+                    self._attr_native_value = None
+
+            restored_attrs = dict(restored_state.attributes or {})
+            self._last_attributes = {
+                "starting_hour": restored_attrs.get("starting_hour", self._starting_hour),
+                "hours_ahead": restored_attrs.get("hours_ahead", self._hours_ahead),
+                "hours": list(restored_attrs.get("hours") or []),
+            }
 
         await self._async_update_forecast_energy()
 
