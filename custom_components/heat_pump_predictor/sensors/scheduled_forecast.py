@@ -68,10 +68,12 @@ class ScheduledForecastEnergySensor(HeatPumpBaseEntity, RestoreSensor):
                     self._attr_native_value = None
 
             restored_attrs = dict(restored_state.attributes or {})
+            restored_hours = list(restored_attrs.get("hours") or [])
+            restored_hours = self._add_hours(restored_hours)
             self._last_attributes = {
                 "starting_hour": restored_attrs.get("starting_hour", self._starting_hour),
                 "hours_ahead": restored_attrs.get("hours_ahead", self._hours_ahead),
-                "hours": list(restored_attrs.get("hours") or []),
+                "hours": restored_hours,
             }
 
         await self._async_update_forecast_energy()
@@ -107,7 +109,8 @@ class ScheduledForecastEnergySensor(HeatPumpBaseEntity, RestoreSensor):
             previous_hours = self._last_attributes.get("hours") or []
             current_hours = response.get("hours") or []
             keep = 3 * self._hours_ahead
-            hours = (list(previous_hours) + list(current_hours))[-keep:]
+            hours = self._add_hours(previous_hours)
+            hours = self._add_hours(current_hours, hours)[-keep:]
             attributes: dict[str, Any] = {
                 "starting_hour": self._starting_hour,
                 "hours_ahead": self._hours_ahead,
@@ -145,3 +148,32 @@ class ScheduledForecastEnergySensor(HeatPumpBaseEntity, RestoreSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return self._last_attributes
+
+    def _add_hours(
+        self, hours_to_add: list[Any], existing_hours: list[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]]:
+        """Merge hourly entries by datetime into a new list, preserving order."""
+
+        combined_hours: list[dict[str, Any]] = [] if existing_hours is None else list(existing_hours)
+        index_by_dt: dict[str, int] = {}
+
+        for idx, item in enumerate(combined_hours):
+            if not isinstance(item, dict):
+                continue
+            dt_val = item.get("datetime")
+            if dt_val:
+                index_by_dt[dt_val] = idx
+
+        for item in hours_to_add:
+            if not isinstance(item, dict):
+                continue
+            dt_val = item.get("datetime")
+            if not dt_val:
+                continue
+            if dt_val in index_by_dt:
+                combined_hours[index_by_dt[dt_val]].update(item)
+                continue
+            index_by_dt[dt_val] = len(combined_hours)
+            combined_hours.append(dict(item))
+
+        return combined_hours
