@@ -43,6 +43,9 @@ class HeatPumpPerformanceCurveSensor(HeatPumpBaseEntity, SensorEntity):
                         "temp": temp,
                         "power_overall": round(bucket.average_power_overall, 1),
                         "power_running": round(bucket.average_power_when_running, 1),
+                        "time_overall": round(bucket.total_time_seconds, 1),
+                        "time_running": round(bucket.running_time_seconds, 1),
+                        "percentage": round(bucket.duty_cycle_percent, 2),
                     }
                 )
         return {"data": data}
