@@ -44,15 +44,15 @@ class HeatPumpCalculator:
             midpoint = 25  # Temperature where usage is minimal
             source_temp = source_bucket_index
             target_temp = temperature
-
+            temp_adjustment = 0.1
             if target_temp <= midpoint:
                 temp_diff = target_temp - source_temp
-                multiplier = max(0.1, 1.0 - (0.20 * temp_diff))
+                multiplier = max(0.1, 1.0 - (temp_adjustment * temp_diff))
             else:
                 temp_diff_to_midpoint = midpoint - source_temp
-                multiplier_at_midpoint = max(0.1, 1.0 - (0.20 * temp_diff_to_midpoint))
+                multiplier_at_midpoint = max(0.1, 1.0 - (temp_adjustment * temp_diff_to_midpoint))
                 temp_diff_from_midpoint = target_temp - midpoint
-                multiplier = multiplier_at_midpoint * (1.0 + (0.20 * temp_diff_from_midpoint))
+                multiplier = multiplier_at_midpoint * (1.0 + (temp_adjustment * temp_diff_from_midpoint))
 
             power_overall = source_bucket_data.average_power_overall * multiplier
             power_running = source_bucket_data.average_power_when_running * multiplier
@@ -113,12 +113,21 @@ class HeatPumpCalculator:
 
     @staticmethod
     def trend_adjustment(delta: float) -> float:
-        """Calculate adjustment factor based on hour-to-hour temperature delta."""
+        """
+        Calculate a scaling factor based on hour-to-hour temperature changes.
+        This function produces a multiplier that adjusts predicted energy usage in response
+        to temperature shifts between consecutive hours. A zero change in temperature results
+        in no adjustment. Cooling trends (negative deltas) increase the multiplier up to 5%,
+        while warming trends (positive deltas) decrease it down to 0.0, scaled proportionally
+        to the magnitude of the change and capped at a 1.5°C difference.
+            delta (float): The difference in temperature from one hour to the next (°C).
+            float: A multiplier reflecting increased (cooling) or decreased (warming) energy needs.
+        """
         if delta == 0:
             return 1.0
 
         ratio = min(1.0, abs(delta) / 1.5)
-        factor = 0.20 * ratio
+        factor = 0.05 * ratio
         if delta < 0:
             return 1.0 + factor  # getting colder -> more energy
         return max(0.0, 1.0 - factor)  # getting warmer -> less energy
