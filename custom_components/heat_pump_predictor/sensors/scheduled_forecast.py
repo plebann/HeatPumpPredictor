@@ -22,7 +22,7 @@ class ScheduledForecastEnergySensor(HeatPumpBaseEntity, RestoreSensor):
     _attr_should_poll = False
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = "kWh"
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL
     _attr_icon = "mdi:lightning-bolt"
 
     def __init__(
