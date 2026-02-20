@@ -115,22 +115,19 @@ class HeatPumpCalculator:
     def trend_adjustment(delta: float) -> float:
         """
         Calculate a scaling factor based on hour-to-hour temperature changes.
-        This function produces a multiplier that adjusts predicted energy usage in response
-        to temperature shifts between consecutive hours. A zero change in temperature results
-        in no adjustment. Cooling trends (negative deltas) increase the multiplier up to 5%,
-        while warming trends (positive deltas) decrease it down to 0.0, scaled proportionally
-        to the magnitude of the change and capped at a 1.5°C difference.
+        Cooling trends (negative deltas) increase the multiplier by 10% per degree,
+        capped at 1.4. Warming trends (positive deltas) decrease the multiplier by
+        15% per degree, floored at 0.5. A zero change in temperature applies no
+        adjustment.
             delta (float): The difference in temperature from one hour to the next (°C).
             float: A multiplier reflecting increased (cooling) or decreased (warming) energy needs.
         """
         if delta == 0:
             return 1.0
 
-        ratio = min(1.0, abs(delta) / 1.5)
-        factor = 0.05 * ratio
         if delta < 0:
-            return 1.0 + factor  # getting colder -> more energy
-        return max(0.0, 1.0 - factor)  # getting warmer -> less energy
+            return min(1.4, 1.0 + (0.10 * abs(delta)))  # getting colder -> more energy
+        return max(0.5, 1.0 - (0.15 * delta))  # getting warmer -> less energy
 
     @staticmethod
     def _combine_confidence(conf_a: str, conf_b: str, approximated: bool) -> str:
