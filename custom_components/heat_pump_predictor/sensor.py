@@ -5,7 +5,7 @@ import logging
 from typing import Iterable
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_WEATHER_ENTITY, DOMAIN
@@ -45,8 +45,23 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator: HeatPumpCoordinator = hass.data[DOMAIN][entry.entry_id]
+    created_bucket_temps = set(coordinator.data_manager.observed_bucket_temperatures)
 
     entities: list[HeatPumpSensorBase] = list(_build_bucket_entities(coordinator))
+
+    @callback
+    def _add_observed_bucket_entities(bucket_temp: int) -> None:
+        if bucket_temp in created_bucket_temps:
+            return
+        bucket = coordinator.data_manager.buckets.get(bucket_temp)
+        if bucket is None or bucket.total_time_seconds == 0:
+            return
+        created_bucket_temps.add(bucket_temp)
+        async_add_entities(list(build_bucket_sensors(coordinator, [bucket_temp])))
+
+    entry.async_on_unload(
+        coordinator.async_register_bucket_observed_callback(_add_observed_bucket_entities)
+    )
 
     weather_entity = _resolve_weather_entity(hass, entry)
     if weather_entity:

@@ -8,8 +8,6 @@ import math
 
 from homeassistant.util import dt as dt_util
 
-from .const import MIN_TEMP, MAX_TEMP
-
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -52,11 +50,7 @@ class HeatPumpDataManager:
     
     def __init__(self) -> None:
         """Initialize the data manager."""
-        # 56 buckets from -25 to 30
-        self.buckets: dict[int, TemperatureBucketData] = {
-            temp: TemperatureBucketData(temp, 0.0, 0.0, 0.0, None)
-            for temp in range(MIN_TEMP, MAX_TEMP + 1)
-        }
+        self.buckets: dict[int, TemperatureBucketData] = {}
         
         # Track previous state for delta calculations
         self._last_temperature: float | None = None
@@ -66,9 +60,48 @@ class HeatPumpDataManager:
     
     def get_bucket(self, temperature: float) -> int:
         """Get bucket index for temperature using floor function."""
-        temp_int = int(math.floor(temperature))
-        # Clamp to range [-25, 30]
-        return max(MIN_TEMP, min(MAX_TEMP, temp_int))
+        return int(math.floor(temperature))
+
+    def get_or_create_bucket(self, temperature: float) -> TemperatureBucketData:
+        """Return existing bucket data, creating it if needed."""
+        bucket_temp = self.get_bucket(temperature)
+        if bucket_temp not in self.buckets:
+            self.buckets[bucket_temp] = TemperatureBucketData(bucket_temp, 0.0, 0.0, 0.0, None)
+        return self.buckets[bucket_temp]
+
+    @property
+    def observed_bucket_temperatures(self) -> list[int]:
+        """Return bucket temperatures that have observed time, sorted ascending."""
+        return sorted(
+            temp
+            for temp, bucket in self.buckets.items()
+            if bucket.total_time_seconds > 0
+        )
+
+    @property
+    def observed_temperature_span(self) -> tuple[int, int] | None:
+        """Return lowest and highest bucket temperatures with observed time."""
+        observed_temps = self.observed_bucket_temperatures
+        if not observed_temps:
+            return None
+        return observed_temps[0], observed_temps[-1]
+
+    @property
+    def service_prediction_range(self) -> tuple[int, int] | None:
+        """Return inclusive manual service prediction range, if history exists."""
+        observed_span = self.observed_temperature_span
+        if observed_span is None:
+            return None
+        lowest_bucket, highest_bucket = observed_span
+        return lowest_bucket - 5, highest_bucket + 5
+
+    def is_within_service_prediction_range(self, temperature: float) -> bool:
+        """Return whether temperature is inside the manual service range."""
+        prediction_range = self.service_prediction_range
+        if prediction_range is None:
+            return False
+        lower_bound, upper_bound = prediction_range
+        return lower_bound <= temperature <= upper_bound
     
     def process_state_update(
         self,
@@ -76,7 +109,7 @@ class HeatPumpDataManager:
         current_energy_kwh: float,
         is_running: bool,
         timestamp: datetime,
-    ) -> None:
+    ) -> int | None:
         """Process state update with previous-state attribution logic."""
         # First update - initialize tracking
         if self._last_update_time is None:
@@ -86,7 +119,7 @@ class HeatPumpDataManager:
             self._last_running_state = is_running
             _LOGGER.debug("Initialized tracking with temp=%.1f°C, energy=%.2f kWh", 
                          current_temp, current_energy_kwh)
-            return
+            return None
         
         # Calculate deltas
         time_delta_seconds = (timestamp - self._last_update_time).total_seconds()
@@ -95,18 +128,19 @@ class HeatPumpDataManager:
         # Validate deltas
         if time_delta_seconds <= 0:
             _LOGGER.warning("Invalid time delta: %s seconds", time_delta_seconds)
-            return
+            return None
         
         if energy_delta_kwh < 0:
             _LOGGER.warning("Energy counter decreased: %.2f -> %.2f kWh",
                           self._last_energy_kwh, current_energy_kwh)
             # Counter reset - update tracking and return
             self._last_energy_kwh = current_energy_kwh
-            return
+            return None
         
         # CRITICAL: Attribute to PREVIOUS bucket (where we WERE)
         bucket_temp = self.get_bucket(self._last_temperature)
-        bucket = self.buckets[bucket_temp]
+        bucket = self.get_or_create_bucket(self._last_temperature)
+        had_observed_time = bucket.total_time_seconds > 0
         
         # Update bucket data
         bucket.total_time_seconds += time_delta_seconds
@@ -131,6 +165,8 @@ class HeatPumpDataManager:
         self._last_energy_kwh = current_energy_kwh
         self._last_running_state = is_running
         self._last_update_time = timestamp
+
+        return bucket_temp if not had_observed_time and bucket.total_time_seconds > 0 else None
     
     def to_dict(self) -> dict:
         """Serialize buckets to dictionary for storage."""
@@ -160,18 +196,17 @@ class HeatPumpDataManager:
         
         for temp_str, bucket_data in buckets_data.items():
             temp = int(temp_str)
-            if temp in self.buckets:
-                last_update = None
-                if bucket_data.get("last_update"):
-                    last_update = datetime.fromisoformat(bucket_data["last_update"])
-                
-                self.buckets[temp] = TemperatureBucketData(
-                    temperature=bucket_data["temperature"],
-                    total_energy_kwh=bucket_data["total_energy_kwh"],
-                    total_time_seconds=bucket_data["total_time_seconds"],
-                    running_time_seconds=bucket_data["running_time_seconds"],
-                    last_update=last_update,
-                )
+            last_update = None
+            if bucket_data.get("last_update"):
+                last_update = datetime.fromisoformat(bucket_data["last_update"])
+
+            self.buckets[temp] = TemperatureBucketData(
+                temperature=bucket_data["temperature"],
+                total_energy_kwh=bucket_data["total_energy_kwh"],
+                total_time_seconds=bucket_data["total_time_seconds"],
+                running_time_seconds=bucket_data["running_time_seconds"],
+                last_update=last_update,
+            )
         
         # Restore tracking state (critical for correct delta calculations after restart)
         if "tracking" in data:

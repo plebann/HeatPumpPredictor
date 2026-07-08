@@ -25,7 +25,7 @@ _Avoid_: ambient value, weather temperature, indoor temperature
 ### Performance Model
 
 **Temperature Bucket**:
-A whole-degree outdoor temperature band used to group observed heat pump behavior.
+A whole-degree outdoor temperature band created as needed from observed outdoor temperature readings to group observed heat pump behavior without a fixed supported temperature range. Bucket `N` covers outdoor temperatures from `N°C` inclusive up to `N+1°C` exclusive.
 _Avoid_: temperature range, bin, slot
 
 **Bucket Observation**:
@@ -99,9 +99,13 @@ A qualitative indication of how much observed bucket data supports an energy pre
 _Avoid_: accuracy, certainty, reliability score
 
 **Approximated Prediction**:
-A prediction derived from a nearby temperature bucket because the requested bucket has no direct observations.
+A prediction derived from the nearest observed temperature bucket because the requested outdoor temperature has no direct observations, including requests outside the currently observed bucket span.
 _Avoid_: interpolated result, fallback result, guessed estimate
 
 **Approximation Source**:
 The temperature bucket whose observations were used to produce an approximated prediction.
 _Avoid_: fallback bucket, source bin, nearest sample
+
+**Service Prediction Range**:
+The inclusive outdoor temperature span accepted by the manual energy calculation service, from five degrees below the lowest temperature bucket with observed time to five degrees above the highest temperature bucket with observed time.
+_Avoid_: supported temperature range, integration temperature limit, forecast range

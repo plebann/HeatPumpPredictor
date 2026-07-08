@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from homeassistant.components.sensor import SensorEntity
 
-from ..const import MAX_TEMP, MIN_TEMP
 from ..coordinator import HeatPumpCoordinator
 from ..shared_base import HeatPumpBaseEntity
 from ..const import DOMAIN
@@ -35,7 +34,7 @@ class HeatPumpPerformanceCurveSensor(HeatPumpBaseEntity, SensorEntity):
 
     def _get_power_curve_data(self) -> dict:
         data = []
-        for temp in range(MIN_TEMP, MAX_TEMP + 1):
+        for temp in self.coordinator.data_manager.observed_bucket_temperatures:
             bucket = self.coordinator.data_manager.buckets.get(temp)
             if bucket and bucket.total_time_seconds > 0:
                 data.append(
@@ -52,7 +51,7 @@ class HeatPumpPerformanceCurveSensor(HeatPumpBaseEntity, SensorEntity):
 
     def _get_duty_cycle_curve_data(self) -> dict:
         data = []
-        for temp in range(MIN_TEMP, MAX_TEMP + 1):
+        for temp in self.coordinator.data_manager.observed_bucket_temperatures:
             bucket = self.coordinator.data_manager.buckets.get(temp)
             if bucket and bucket.total_time_seconds > 0:
                 data.append({"temp": temp, "duty_cycle": round(bucket.duty_cycle_percent, 2)})
@@ -60,7 +59,7 @@ class HeatPumpPerformanceCurveSensor(HeatPumpBaseEntity, SensorEntity):
 
     def _get_energy_distribution_data(self) -> dict:
         data = []
-        for temp in range(MIN_TEMP, MAX_TEMP + 1):
+        for temp in self.coordinator.data_manager.observed_bucket_temperatures:
             bucket = self.coordinator.data_manager.buckets.get(temp)
             if bucket and bucket.total_energy_kwh > 0:
                 data.append({"temp": temp, "energy": round(bucket.total_energy_kwh, 2)})

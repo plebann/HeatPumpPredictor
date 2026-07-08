@@ -5,9 +5,6 @@ from datetime import timedelta
 
 DOMAIN = "heat_pump_predictor"
 
-# Temperature range constants
-MIN_TEMP = -25
-MAX_TEMP = 30
 HEATING_ZONE_MAX_TEMP = 17
 COOLING_ZONE_MIN_TEMP = 23
 

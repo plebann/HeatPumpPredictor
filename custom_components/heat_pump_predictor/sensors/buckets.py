@@ -6,8 +6,6 @@ from typing import Iterable
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
 from ..const import (
-    MAX_TEMP,
-    MIN_TEMP,
     TRANSLATION_KEY_AVG_POWER_OVERALL,
     TRANSLATION_KEY_AVG_POWER_RUNNING,
     TRANSLATION_KEY_DUTY_CYCLE,
@@ -54,10 +52,18 @@ class HeatPumpDutyCycleSensor(HeatPumpSensorBase[HeatPumpSensorEntityDescription
         return None if not bucket or not self.entity_description.value_fn else self.entity_description.value_fn(bucket)
 
 
-def build_bucket_sensors(coordinator: HeatPumpCoordinator) -> Iterable[HeatPumpSensorBase]:
-    """Create all bucket sensors for the configured temperature range."""
+def build_bucket_sensors(
+    coordinator: HeatPumpCoordinator, temperatures: Iterable[int] | None = None
+) -> Iterable[HeatPumpSensorBase]:
+    """Create bucket sensors for observed bucket temperatures."""
 
-    for temp in range(MIN_TEMP, MAX_TEMP + 1):
+    bucket_temperatures = (
+        coordinator.data_manager.observed_bucket_temperatures
+        if temperatures is None
+        else sorted(temperatures)
+    )
+
+    for temp in bucket_temperatures:
         yield HeatPumpEnergySensor(
             coordinator,
             HeatPumpSensorEntityDescription(

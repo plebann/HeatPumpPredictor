@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from .const import COOLING_ZONE_MIN_TEMP, HEATING_ZONE_MAX_TEMP, MAX_TEMP, MIN_TEMP
+from .const import COOLING_ZONE_MIN_TEMP, HEATING_ZONE_MAX_TEMP
 from .data_manager import HeatPumpDataManager, TemperatureBucketData
 
 
@@ -18,21 +18,20 @@ class HeatPumpCalculator:
     def estimate_power_for_temperature(self, temperature: float) -> dict[str, Any]:
         """Estimate bucketed power metrics for a given temperature."""
         bucket_index = self._data_manager.get_bucket(temperature)
-        bucket_data = self._data_manager.buckets[bucket_index]
+        bucket_data = self._data_manager.buckets.get(bucket_index)
 
         is_approximated = False
         approximation_source = None
 
-        if bucket_data.total_time_seconds == 0:
+        if bucket_data is None or bucket_data.total_time_seconds == 0:
             source_bucket_index = None
             min_distance = float("inf")
 
-            for temp in range(MIN_TEMP, MAX_TEMP + 1):
-                if self._data_manager.buckets[temp].total_time_seconds > 0:
-                    distance = abs(temp - temperature)
-                    if distance < min_distance:
-                        min_distance = distance
-                        source_bucket_index = temp
+            for temp in self._data_manager.observed_bucket_temperatures:
+                distance = abs(temp - temperature)
+                if distance < min_distance:
+                    min_distance = distance
+                    source_bucket_index = temp
 
             if source_bucket_index is None:
                 raise ValueError(f"No data available to approximate temperature {temperature}")
@@ -79,8 +78,8 @@ class HeatPumpCalculator:
 
     def interpolate_estimation(self, temperature: float) -> dict[str, Any]:
         """Estimate power for fractional temperatures via linear interpolation."""
-        lower = max(MIN_TEMP, min(MAX_TEMP, math.floor(temperature)))
-        upper = max(MIN_TEMP, min(MAX_TEMP, math.ceil(temperature)))
+        lower = math.floor(temperature)
+        upper = math.ceil(temperature)
 
         if lower == upper:
             return self.estimate_power_for_temperature(float(temperature))

@@ -13,8 +13,6 @@ from .const import (
     ATTR_CONFIG_ENTRY_ID,
     ATTR_TEMPERATURE,
     DOMAIN,
-    MAX_TEMP,
-    MIN_TEMP,
     SERVICE_CALCULATE_ENERGY,
     SERVICE_CALCULATE_FORECAST_ENERGY,
     ATTR_STARTING_HOUR,
@@ -30,8 +28,7 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 # Service schema
 SERVICE_CALCULATE_ENERGY_SCHEMA = vol.Schema({
     vol.Required(ATTR_TEMPERATURE): vol.All(
-        vol.Coerce(float),
-        vol.Range(min=MIN_TEMP, max=MAX_TEMP)
+        vol.Coerce(float)
     ),
     vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
 })
@@ -91,6 +88,36 @@ def async_setup_services(hass: HomeAssistant) -> None:
         
         # Get coordinator
         coordinator = _get_coordinator_for_service(hass, config_entry_id)
+
+        prediction_range = coordinator.data_manager.service_prediction_range
+        if prediction_range is None:
+            _LOGGER.warning(
+                "Cannot calculate energy for %.2f°C because no temperature bucket has observed time",
+                temperature,
+            )
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="no_data_for_approximation",
+                translation_placeholders={"temperature": str(temperature)},
+            )
+
+        if not coordinator.data_manager.is_within_service_prediction_range(temperature):
+            lower_bound, upper_bound = prediction_range
+            _LOGGER.warning(
+                "Temperature %.2f°C is outside manual service prediction range %d°C to %d°C",
+                temperature,
+                lower_bound,
+                upper_bound,
+            )
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="service_temperature_out_of_range",
+                translation_placeholders={
+                    "temperature": str(temperature),
+                    "lower_bound": str(lower_bound),
+                    "upper_bound": str(upper_bound),
+                },
+            )
         
         try:
             estimation = coordinator.calculator.estimate_power_for_temperature(temperature)

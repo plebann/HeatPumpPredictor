@@ -120,6 +120,9 @@
     "no_data_for_approximation": {
       "message": "Brak danych dla temperatury {temperature}°C i brak koszyków z danymi do przybliżenia."
     },
+    "service_temperature_out_of_range": {
+      "message": "Temperatura {temperature}°C jest poza zakresem ręcznej predykcji usługi ({lower_bound}°C do {upper_bound}°C)."
+    },
     "invalid_config_entry": {
       "message": "Wpis konfiguracji {config_entry} nie został znaleziony."
     },

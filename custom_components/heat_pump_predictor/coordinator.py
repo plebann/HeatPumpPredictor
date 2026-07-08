@@ -39,6 +39,7 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}.{entry.entry_id}")
         self._save_debounce_seconds = 5
         self._forecast: list[dict[str, Any]] | None = None
+        self._bucket_observed_callbacks: list[Callable[[int], None]] = []
         
         # Create device info
         self.device_info = DeviceInfo(
@@ -58,7 +59,10 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             current_energy = float(energy_state.state)
             current_temp = float(temp_state.state)
             is_running = running_state.state == "on"
-            self.data_manager.process_state_update(current_temp, current_energy, is_running, dt_util.utcnow())
+            new_bucket_temp = self.data_manager.process_state_update(
+                current_temp, current_energy, is_running, dt_util.utcnow()
+            )
+            self._notify_bucket_observed(new_bucket_temp)
             await self._save_data()
             return self._build_coordinator_data()
         except Exception as err:
@@ -123,6 +127,26 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Schedule a debounced save to storage."""
         self._store.async_delay_save(self.data_manager.to_dict, self._save_debounce_seconds)
 
+    @callback
+    def async_register_bucket_observed_callback(self, callback_fn: Callable[[int], None]) -> Callable[[], None]:
+        """Register a callback for newly observed temperature buckets."""
+        self._bucket_observed_callbacks.append(callback_fn)
+
+        @callback
+        def _unsubscribe() -> None:
+            if callback_fn in self._bucket_observed_callbacks:
+                self._bucket_observed_callbacks.remove(callback_fn)
+
+        return _unsubscribe
+
+    @callback
+    def _notify_bucket_observed(self, bucket_temp: int | None) -> None:
+        """Notify listeners that a temperature bucket first received observed time."""
+        if bucket_temp is None:
+            return
+        for callback_fn in list(self._bucket_observed_callbacks):
+            callback_fn(bucket_temp)
+
     async def _handle_hass_stop(self, event: Event) -> None:
         """Handle Home Assistant stop to flush data."""
         await self._save_data()
@@ -135,16 +159,17 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not all([energy_state, running_state, temp_state]):
             return
         try:
-            self.data_manager.process_state_update(
+            new_bucket_temp = self.data_manager.process_state_update(
                 float(temp_state.state), float(energy_state.state), running_state.state == "on", dt_util.utcnow()
             )
+            self._notify_bucket_observed(new_bucket_temp)
             # Update coordinator data without cancelling the scheduled refresh
             self.async_set_updated_data(self._build_coordinator_data())
             self.last_update_success = True
             self.async_update_listeners()
             self._schedule_debounced_save()
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as err:
+            _LOGGER.debug("Ignoring invalid heat pump sensor state update: %s", err)
 
     async def async_refresh_forecast(self, weather_entity: str) -> list[dict[str, Any]]:
         """Fetch and cache hourly forecast for downstream calculations."""

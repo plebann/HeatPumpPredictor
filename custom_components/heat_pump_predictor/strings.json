@@ -120,6 +120,9 @@
     "no_data_for_approximation": {
       "message": "No data available for temperature {temperature}°C and no data found in any bucket for approximation."
     },
+    "service_temperature_out_of_range": {
+      "message": "Temperature {temperature}°C is outside the manual service prediction range ({lower_bound}°C to {upper_bound}°C)."
+    },
     "invalid_config_entry": {
       "message": "Config entry {config_entry} not found."
     },
