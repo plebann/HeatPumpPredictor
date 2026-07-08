@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from .const import MAX_TEMP, MIN_TEMP
+from .const import COOLING_ZONE_MIN_TEMP, HEATING_ZONE_MAX_TEMP, MAX_TEMP, MIN_TEMP
 from .data_manager import HeatPumpDataManager, TemperatureBucketData
 
 
@@ -112,22 +112,32 @@ class HeatPumpCalculator:
         }
 
     @staticmethod
-    def trend_adjustment(delta: float) -> float:
+    def trend_adjustment(delta: float, temperature: float) -> float:
         """
         Calculate a scaling factor based on hour-to-hour temperature changes.
-        Cooling trends (negative deltas) increase the multiplier by 10% per degree,
-        capped at 1.4. Warming trends (positive deltas) decrease the multiplier by
-        15% per degree, floored at 0.5. A zero change in temperature applies no
-        adjustment.
+
+        Heating temperatures increase demand when temperature falls. Cooling
+        temperatures increase demand when temperature rises. Neutral temperatures
+        do not apply a trend adjustment.
+
             delta (float): The difference in temperature from one hour to the next (°C).
-            float: A multiplier reflecting increased (cooling) or decreased (warming) energy needs.
+            temperature (float): The forecast hour temperature used to select the
+                operating zone.
+            float: A multiplier reflecting increased or decreased energy needs.
         """
         if delta == 0:
             return 1.0
 
-        if delta < 0:
-            return min(1.4, 1.0 + (0.10 * abs(delta)))  # getting colder -> more energy
-        return max(0.5, 1.0 - (0.15 * delta))  # getting warmer -> less energy
+        if temperature <= HEATING_ZONE_MAX_TEMP:
+            demand_delta = -delta
+        elif temperature >= COOLING_ZONE_MIN_TEMP:
+            demand_delta = delta
+        else:
+            return 1.0
+
+        if demand_delta > 0:
+            return min(1.4, 1.0 + (0.10 * demand_delta))
+        return max(0.5, 1.0 + (0.15 * demand_delta))
 
     @staticmethod
     def _combine_confidence(conf_a: str, conf_b: str, approximated: bool) -> str:

@@ -90,6 +90,10 @@ _Avoid_: daily job, scheduled sensor, forecast task
 A multiplier applied to forecast energy when the forecast temperature changes from one hour to the next.
 _Avoid_: weather correction, slope adjustment, temperature scaling
 
+**Temperature Operating Zone**:
+One of the outdoor temperature regions used to interpret trend adjustment: heating at 17°C and below, neutral from 18°C through 22°C, and cooling at 23°C and above.
+_Avoid_: mode, season, temperature range
+
 **Prediction Confidence**:
 A qualitative indication of how much observed bucket data supports an energy prediction.
 _Avoid_: accuracy, certainty, reliability score

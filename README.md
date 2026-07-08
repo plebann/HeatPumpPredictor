@@ -183,7 +183,7 @@ Two response-only services expose the predictor calculations without creating ex
   - **Purpose**: Predict energy for an hourly forecast window using the cached weather forecast and bucket models.
   - **Params**: `starting_hour` (0–23, local), `hours_ahead` (1–48), optional `config_entry_id` when multiple entries exist.
   - **Returns**: `total_energy_kwh`, per-hour array `hours` with `datetime`, `temperature`, optional `temperature_delta`, `trend_adjustment`, `energy_kwh`, `confidence`, `approximated`, `approximation_source`, plus `hours_requested`, `hours_returned`, `approximated_hours`, `starting_hour`.
-  - **Notes**: Requires the hourly forecast cache sensor to have data; applies a trend adjustment when temperatures rise/fall hour to hour.
+  - **Notes**: Requires the hourly forecast cache sensor to have data; applies a trend adjustment when temperatures rise/fall hour to hour. Heating temperatures (`<= 17°C`) increase energy when temperature falls, cooling temperatures (`>= 23°C`) increase energy when temperature rises, and neutral temperatures (`18-22°C`) apply no trend adjustment.
 
 ### Quick service examples
 

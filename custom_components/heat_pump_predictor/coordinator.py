@@ -17,7 +17,7 @@ from homeassistant.util import dt as dt_util
 
 from .calculator import HeatPumpCalculator
 from .const import DOMAIN, UPDATE_INTERVAL, CONF_ENERGY_SENSOR, CONF_RUNNING_SENSOR, CONF_TEMPERATURE_SENSOR
-from .data_manager import HeatPumpDataManager, TemperatureBucketData
+from .data_manager import HeatPumpDataManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -252,7 +252,15 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     translation_placeholders={"datetime": dt_val.isoformat()},
                 )
 
-            temp_float = float(temperature)
+            try:
+                temp_float = float(temperature)
+            except (TypeError, ValueError) as err:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="forecast_hour_missing",
+                    translation_placeholders={"datetime": dt_val.isoformat()},
+                ) from err
+
             try:
                 estimation = self.calculator.interpolate_estimation(temp_float)
             except ValueError as err:
@@ -267,8 +275,10 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 delta = temp_float - previous_temp
 
             energy_kwh = estimation["power_overall_w"] / 1000.0
+            trend_adjustment = None
             if delta is not None:
-                energy_kwh *= self.calculator.trend_adjustment(delta)
+                trend_adjustment = self.calculator.trend_adjustment(delta, temp_float)
+                energy_kwh *= trend_adjustment
 
             total_energy_kwh += energy_kwh
             approximated_hours += 1 if estimation["approximated"] else 0
@@ -278,7 +288,7 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "datetime": dt_val.isoformat(),
                     "temperature": temp_float,
                     "temperature_delta": delta,
-                    "trend_adjustment": None if delta is None else self.calculator.trend_adjustment(delta),
+                    "trend_adjustment": trend_adjustment,
                     "energy_kwh": round(energy_kwh, 3),
                     "confidence": estimation["confidence"],
                     "approximated": estimation["approximated"],
