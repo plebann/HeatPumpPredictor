@@ -1,7 +1,6 @@
-﻿"""Coordinator for Heat Pump Predictor integration."""
+"""Coordinator for Heat Pump Predictor integration."""
 from __future__ import annotations
 
-from datetime import timedelta
 import logging
 from typing import Any, Callable
 
@@ -18,11 +17,18 @@ from homeassistant.util import dt as dt_util
 from .calculator import HeatPumpCalculator
 from .const import DOMAIN, UPDATE_INTERVAL, CONF_ENERGY_SENSOR, CONF_RUNNING_SENSOR, CONF_TEMPERATURE_SENSOR
 from .data_manager import HeatPumpDataManager
+from .forecast_energy import ForecastEnergyCalculationError, ForecastEnergyCalculator
 
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
 STORAGE_KEY = "heat_pump_predictor"
+FORECAST_ENERGY_TRANSLATION_KEYS = {
+    "forecast_window_too_small": "forecast_window_too_small",
+    "forecast_hour_missing": "forecast_hour_missing",
+    "no_data_for_approximation": "no_data_for_approximation",
+}
+
 
 class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -30,6 +36,7 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.config_entry = entry
         self.data_manager = HeatPumpDataManager()
         self.calculator = HeatPumpCalculator(self.data_manager)
+        self.forecast_energy_calculator = ForecastEnergyCalculator(self.calculator)
         self._energy_entity = entry.data[CONF_ENERGY_SENSOR]
         self._running_entity = entry.data[CONF_RUNNING_SENSOR]
         self._temperature_entity = entry.data[CONF_TEMPERATURE_SENSOR]
@@ -40,7 +47,7 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._save_debounce_seconds = 5
         self._forecast: list[dict[str, Any]] | None = None
         self._bucket_observed_callbacks: list[Callable[[int], None]] = []
-        
+
         # Create device info
         self.device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
@@ -73,7 +80,7 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if data := await self._store.async_load():
             self.data_manager.from_dict(data)
             _LOGGER.info("Loaded saved heat pump data from storage")
-        
+
         await self.async_config_entry_first_refresh()
         self._unsub_state_listener = async_track_state_change_event(
             self.hass, [self._energy_entity, self._running_entity, self._temperature_entity], self._handle_state_change
@@ -90,7 +97,7 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         await self._save_data()
         _LOGGER.info("Saved heat pump data to storage")
-        
+
         self._async_unsubscribe_state_listener()
         self._async_unsubscribe_stop_listener()
 
@@ -113,7 +120,7 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except ValueError:
             _LOGGER.debug("Stop listener already removed during shutdown", exc_info=True)
         self._unsub_stop_listener = None
-    
+
     async def _save_data(self) -> None:
         """Save bucket data to storage."""
         try:
@@ -208,129 +215,22 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 translation_key="forecast_unavailable",
             )
 
-        now_local = dt_util.as_local(dt_util.utcnow())
-        parsed_forecast: list[tuple[Any, dict[str, Any]]] = []
-        for item in self._forecast:
-            dt_val = dt_util.parse_datetime(item.get("datetime")) if isinstance(item, dict) else None
-            if dt_val is None:
-                continue
-            parsed_forecast.append((dt_util.as_local(dt_val), item))
-
-        parsed_forecast.sort(key=lambda pair: pair[0])
-
-        start_indexes = [idx for idx, (dt_val, _) in enumerate(parsed_forecast) if dt_val >= now_local and dt_val.hour == starting_hour]
-        if not start_indexes:
+        try:
+            result = self.forecast_energy_calculator.calculate(
+                self._forecast,
+                starting_hour=starting_hour,
+                hours_ahead=hours_ahead,
+                current_temperature=current_temperature,
+                now=dt_util.as_local(dt_util.utcnow()),
+            )
+        except ForecastEnergyCalculationError as err:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
-                translation_key="forecast_window_too_small",
-            )
+                translation_key=FORECAST_ENERGY_TRANSLATION_KEYS[err.reason_key],
+                translation_placeholders=err.placeholders,
+            ) from err
 
-        start_index = start_indexes[0]
-        window = parsed_forecast[start_index : start_index + hours_ahead]
-
-        if len(window) < hours_ahead:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="forecast_window_too_small",
-            )
-
-        total_energy_kwh = 0.0
-        hour_details: list[dict[str, Any]] = []
-        approximated_hours = 0
-
-        window_start_dt = parsed_forecast[start_index][0]
-        next_hour_start = now_local.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-
-        if window_start_dt == next_hour_start:
-            previous_temp: float | None = current_temperature
-        else:
-            if start_index == 0:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="forecast_window_too_small",
-                )
-
-            prev_dt, prev_payload = parsed_forecast[start_index - 1]
-            prev_temp_raw = prev_payload.get("temperature") if isinstance(prev_payload, dict) else None
-            if prev_temp_raw is None:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="forecast_hour_missing",
-                    translation_placeholders={"datetime": prev_dt.isoformat()},
-                )
-
-            try:
-                previous_temp = float(prev_temp_raw)
-            except (TypeError, ValueError) as err:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="forecast_hour_missing",
-                    translation_placeholders={"datetime": prev_dt.isoformat()},
-                ) from err
-
-        for dt_val, payload in window:
-            temperature = payload.get("temperature") if isinstance(payload, dict) else None
-            if temperature is None:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="forecast_hour_missing",
-                    translation_placeholders={"datetime": dt_val.isoformat()},
-                )
-
-            try:
-                temp_float = float(temperature)
-            except (TypeError, ValueError) as err:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="forecast_hour_missing",
-                    translation_placeholders={"datetime": dt_val.isoformat()},
-                ) from err
-
-            try:
-                estimation = self.calculator.interpolate_estimation(temp_float)
-            except ValueError as err:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="no_data_for_approximation",
-                    translation_placeholders={"temperature": str(temp_float)},
-                ) from err
-
-            delta = None
-            if previous_temp is not None:
-                delta = temp_float - previous_temp
-
-            energy_kwh = estimation["power_overall_w"] / 1000.0
-            trend_adjustment = None
-            if delta is not None:
-                trend_adjustment = self.calculator.trend_adjustment(delta, temp_float)
-                energy_kwh *= trend_adjustment
-
-            total_energy_kwh += energy_kwh
-            approximated_hours += 1 if estimation["approximated"] else 0
-
-            hour_details.append(
-                {
-                    "datetime": dt_val.isoformat(),
-                    "temperature": temp_float,
-                    "temperature_delta": delta,
-                    "trend_adjustment": trend_adjustment,
-                    "energy_kwh": round(energy_kwh, 3),
-                    "confidence": estimation["confidence"],
-                    "approximated": estimation["approximated"],
-                    "approximation_source": estimation.get("approximation_source"),
-                }
-            )
-
-            previous_temp = temp_float
-
-        return {
-            "total_energy_kwh": round(total_energy_kwh, 3),
-            "hours": hour_details,
-            "hours_requested": hours_ahead,
-            "hours_returned": len(hour_details),
-            "approximated_hours": approximated_hours,
-            "starting_hour": starting_hour,
-        }
+        return result.as_response()
 
     @property
     def forecast(self) -> list[dict[str, Any]] | None:
