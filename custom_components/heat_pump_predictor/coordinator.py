@@ -5,8 +5,14 @@ import logging
 from typing import Any, Callable
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import HomeAssistant, Event, callback
+from homeassistant.const import (
+    EVENT_HOMEASSISTANT_STOP,
+    STATE_OFF,
+    STATE_ON,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+)
+from homeassistant.core import HomeAssistant, Event, State, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.event import async_track_state_change_event
@@ -28,6 +34,25 @@ FORECAST_ENERGY_TRANSLATION_KEYS = {
     "forecast_hour_missing": "forecast_hour_missing",
     "no_data_for_approximation": "no_data_for_approximation",
 }
+UNAVAILABLE_SOURCE_STATES = {STATE_UNAVAILABLE, STATE_UNKNOWN}
+
+
+def _state_float_value(state: State) -> float | None:
+    """Return a float for a numeric HA state, or None if it is temporarily unavailable."""
+    if state.state in UNAVAILABLE_SOURCE_STATES:
+        return None
+    return float(state.state)
+
+
+def _running_state_value(state: State) -> bool | None:
+    """Return a binary sensor value, or None if it is temporarily unavailable."""
+    if state.state in UNAVAILABLE_SOURCE_STATES:
+        return None
+    if state.state == STATE_ON:
+        return True
+    if state.state == STATE_OFF:
+        return False
+    return None
 
 
 class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -63,9 +88,14 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             temp_state = self.hass.states.get(self._temperature_entity)
             if not all([energy_state, running_state, temp_state]):
                 raise UpdateFailed("Sensors unavailable")
-            current_energy = float(energy_state.state)
-            current_temp = float(temp_state.state)
-            is_running = running_state.state == "on"
+            current_energy = _state_float_value(energy_state)
+            current_temp = _state_float_value(temp_state)
+            is_running = _running_state_value(running_state)
+            if current_energy is None or current_temp is None or is_running is None:
+                _LOGGER.debug(
+                    "Skipping heat pump update because one or more source sensors are unavailable"
+                )
+                return self._build_coordinator_data()
             new_bucket_temp = self.data_manager.process_state_update(
                 current_temp, current_energy, is_running, dt_util.utcnow()
             )
@@ -166,8 +196,13 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not all([energy_state, running_state, temp_state]):
             return
         try:
+            current_energy = _state_float_value(energy_state)
+            current_temp = _state_float_value(temp_state)
+            is_running = _running_state_value(running_state)
+            if current_energy is None or current_temp is None or is_running is None:
+                return
             new_bucket_temp = self.data_manager.process_state_update(
-                float(temp_state.state), float(energy_state.state), running_state.state == "on", dt_util.utcnow()
+                current_temp, current_energy, is_running, dt_util.utcnow()
             )
             self._notify_bucket_observed(new_bucket_temp)
             # Update coordinator data without cancelling the scheduled refresh
