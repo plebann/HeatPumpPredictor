@@ -72,7 +72,9 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._unsub_validation_schedule: Callable[[], None] | None = None
         self._shutdown = False
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}.{entry.entry_id}")
-        self.forecast_validation = ForecastValidationManager(hass, entry.entry_id)
+        self.forecast_validation = ForecastValidationManager(
+            hass, entry.entry_id, history_entity=self._temperature_entity
+        )
         self._save_debounce_seconds = 5
         self._forecast: list[dict[str, Any]] | None = None
         self._bucket_observed_callbacks: list[Callable[[int], None]] = []

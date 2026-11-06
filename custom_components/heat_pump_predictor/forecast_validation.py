@@ -231,10 +231,12 @@ class ForecastValidationManager:
         hass: Any,
         entry_id: str,
         history_source: Callable[[str, datetime, datetime], Any] | None = None,
+        history_entity: str | None = None,
     ) -> None:
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}.{entry_id}")
         self._data: dict[str, Any] = {"snapshots": {}, "results": {}}
         self._history_source = history_source or self._async_recorder_history
+        self._history_entity = history_entity
         self._callbacks: list[Callable[[], None]] = []
 
     @property
@@ -316,10 +318,13 @@ class ForecastValidationManager:
         self._prune(now)
         selected = select_representative_snapshots(self._data.get("snapshots", {}))
         results = self._data.setdefault("results", {})
+        history_cache: dict[tuple[str, datetime], list[Any] | Exception] = {}
         changed = False
         for key, candidate in selected.items():
             result_key = "|".join((key[0], key[1], key[2]))
             existing = results.get(result_key)
+            if not isinstance(existing, dict):
+                existing = None
             target_at = candidate["target_at"]
             if target_at + timedelta(hours=1) + VALIDATION_DELAY > now:
                 continue
@@ -336,10 +341,21 @@ class ForecastValidationManager:
                 and now > target_at + timedelta(hours=1) + RECORDER_RETRY_WINDOW
             ):
                 continue
+            history_entity = self._history_entity or candidate["weather_entity"]
+            history_key = (history_entity, target_at)
             try:
-                states = await self._get_history(
-                    candidate["weather_entity"], target_at, target_at + timedelta(hours=1)
-                )
+                cached_history = history_cache.get(history_key)
+                if cached_history is None:
+                    try:
+                        cached_history = await self._get_history(
+                            history_entity, target_at, target_at + timedelta(hours=1)
+                        )
+                    except Exception as err:
+                        cached_history = err
+                    history_cache[history_key] = cached_history
+                if isinstance(cached_history, Exception):
+                    raise cached_history
+                states = cached_history
             except Exception:
                 _LOGGER.warning("Recorder history unavailable for %s", result_key, exc_info=True)
                 result = self._result(candidate, "unvalidated", "recorder_unavailable", now)
@@ -348,7 +364,8 @@ class ForecastValidationManager:
                     states, target_at, target_at + timedelta(hours=1)
                 )
                 if actual_mean is None:
-                    result = self._result(candidate, "unvalidated", "no_recorded_states", now)
+                    reason = "insufficient_coverage" if states else "no_recorded_states"
+                    result = self._result(candidate, "unvalidated", reason, now)
                     result["coverage"] = coverage
                 elif coverage < 0.60:
                     result = self._result(candidate, "unvalidated", "insufficient_coverage", now)
@@ -458,6 +475,9 @@ class ForecastValidationManager:
                 del snapshots[content_hash]
         results = self._data.setdefault("results", {})
         for key, result in list(results.items()):
-            target_at = parse_datetime(result.get("target_at")) if isinstance(result, dict) else None
+            if not isinstance(result, dict):
+                del results[key]
+                continue
+            target_at = parse_datetime(result.get("target_at"))
             if target_at is not None and target_at < cutoff:
                 del results[key]

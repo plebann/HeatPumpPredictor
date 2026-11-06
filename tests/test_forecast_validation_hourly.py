@@ -114,6 +114,75 @@ def test_validate_due_retries_recorder_unavailable() -> None:
     assert history_source.await_count == 2
 
 
+def test_validate_due_reads_configured_temperature_sensor_not_weather_entity() -> None:
+    store = Mock()
+    store.async_delay_save = Mock()
+    history_source = AsyncMock(
+        return_value={
+            "sensor.outdoor_temperature": [state("10", START - timedelta(minutes=1))]
+        }
+    )
+    with patch(
+        "custom_components.heat_pump_predictor.forecast_validation.Store", return_value=store
+    ):
+        manager = ForecastValidationManager(
+            Mock(),
+            "entry",
+            history_source=history_source,
+            history_entity="sensor.outdoor_temperature",
+        )
+        target = START + timedelta(hours=1)
+        manager.data["snapshots"] = {
+            "hash": {
+                "weather_entity": "weather.home",
+                "entries": [[target.isoformat(), 12]],
+                "fetched_at": [START.isoformat()],
+            }
+        }
+
+        import asyncio
+
+        asyncio.run(manager.async_validate_due(target + timedelta(hours=1, minutes=10)))
+
+    history_source.assert_awaited_once_with(
+        "sensor.outdoor_temperature", target, target + timedelta(hours=1)
+    )
+    assert next(iter(manager.data["results"].values()))["status"] == "validated"
+
+
+def test_validate_due_caches_history_for_same_target_across_ranges() -> None:
+    store = Mock()
+    store.async_delay_save = Mock()
+    history_source = AsyncMock(
+        return_value={"sensor.temp": [state("10", START - timedelta(minutes=1))]}
+    )
+    with patch(
+        "custom_components.heat_pump_predictor.forecast_validation.Store", return_value=store
+    ):
+        manager = ForecastValidationManager(
+            Mock(), "entry", history_source=history_source, history_entity="sensor.temp"
+        )
+        target = START + timedelta(hours=24)
+        manager.data["snapshots"] = {
+            "short": {
+                "weather_entity": "weather.home",
+                "entries": [[target.isoformat(), 12]],
+                "fetched_at": [(START + timedelta(hours=12)).isoformat()],
+            },
+            "long": {
+                "weather_entity": "weather.home",
+                "entries": [[target.isoformat(), 13]],
+                "fetched_at": [START.isoformat()],
+            },
+        }
+
+        import asyncio
+
+        asyncio.run(manager.async_validate_due(target + timedelta(hours=1, minutes=10)))
+
+    assert history_source.await_count == 1
+
+
 def test_validate_due_prunes_expired_results_before_saving() -> None:
     store = Mock()
     store.async_delay_save = Mock()
@@ -136,6 +205,53 @@ def test_validate_due_prunes_expired_results_before_saving() -> None:
 
     assert manager.data["results"] == {}
     store.async_delay_save.assert_called_once()
+
+
+def test_validate_due_discards_malformed_restored_results() -> None:
+    store = Mock()
+    store.async_delay_save = Mock()
+    with patch(
+        "custom_components.heat_pump_predictor.forecast_validation.Store", return_value=store
+    ):
+        manager = ForecastValidationManager(Mock(), "entry", history_source=AsyncMock())
+        manager.data["results"] = {"malformed": "not-a-result"}
+
+        import asyncio
+
+        asyncio.run(manager.async_validate_due(START))
+
+    assert manager.data["results"] == {}
+
+
+def test_invalid_states_are_insufficient_coverage_not_missing_history() -> None:
+    store = Mock()
+    store.async_delay_save = Mock()
+    target = START + timedelta(hours=1)
+    with patch(
+        "custom_components.heat_pump_predictor.forecast_validation.Store", return_value=store
+    ):
+        manager = ForecastValidationManager(
+            Mock(),
+            "entry",
+            history_source=AsyncMock(
+                return_value={"sensor.temp": [state("unavailable", target)]}
+            ),
+            history_entity="sensor.temp",
+        )
+        manager.data["snapshots"] = {
+            "hash": {
+                "weather_entity": "weather.home",
+                "entries": [[target.isoformat(), 12]],
+                "fetched_at": [START.isoformat()],
+            }
+        }
+
+        import asyncio
+
+        asyncio.run(manager.async_validate_due(target + timedelta(hours=1, minutes=10)))
+
+    result = next(iter(manager.data["results"].values()))
+    assert result["reason"] == "insufficient_coverage"
 
 
 def test_validate_due_replaces_result_for_newer_representative_snapshot() -> None:
