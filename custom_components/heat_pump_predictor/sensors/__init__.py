@@ -10,6 +10,7 @@ from .buckets import (
 from .performance import HeatPumpPerformanceCurveSensor
 from .forecast_cache import HeatPumpForecastSensor
 from .scheduled_forecast import ScheduledForecastEnergySensor
+from .forecast_validation import ForecastTemperatureValidationSensor
 
 __all__ = [
     "HeatPumpSensorBase",
@@ -22,4 +23,5 @@ __all__ = [
     "HeatPumpPerformanceCurveSensor",
     "HeatPumpForecastSensor",
     "ScheduledForecastEnergySensor",
+    "ForecastTemperatureValidationSensor",
 ]

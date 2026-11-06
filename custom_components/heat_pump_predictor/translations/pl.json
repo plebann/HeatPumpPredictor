@@ -76,6 +76,9 @@
       },
       "performance_energy_distribution": {
         "name": "Rozkład zużycia energii"
+      },
+      "forecast_temperature_validation": {
+        "name": "Walidacja temperatury prognozy"
       }
     }
   },
