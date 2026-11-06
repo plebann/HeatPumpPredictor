@@ -23,7 +23,15 @@ else
 fi
 
 cd "$WORKTREE_DIR"
-git checkout -B "$BRANCH" "origin/$BASE_BRANCH"
+CURRENT_BRANCH=$(git branch --show-current)
+if [ "$CURRENT_BRANCH" = "$BRANCH" ]; then
+  : # explicit re-entry in the branch's existing linked worktree
+elif git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+  echo "Spec branch '$BRANCH' already exists. Resume it explicitly; refusing to reset or overwrite local progress." >&2
+  exit 1
+else
+  git switch -c "$BRANCH" "origin/$BASE_BRANCH"
+fi
 ```
 
 Then install dependencies with whatever the repository's lockfile implies (npm, pnpm, bun, cargo, etc.); skip when the project needs no install step.
@@ -31,6 +39,8 @@ Then install dependencies with whatever the repository's lockfile implies (npm, 
 Rules:
 
 - Reuse the current linked worktree when already inside one. Never nest worktrees.
+- Never reset an existing spec branch. Re-enter it explicitly or stop so
+  unpushed work cannot be discarded merely because a slug is reused.
 - The main worktree must stay untouched.
 - Always clean up the temporary worktree at the end, but only if you created it this run.
 

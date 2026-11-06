@@ -45,7 +45,11 @@ Rules:
 - One Step = exactly one code commit. Nothing more, nothing less. No docs-flip commit.
 - Run a quick scratch sanity check (typecheck + new test, from the configured validation commands) to confirm the Step compiles. Do NOT record it anywhere — the checkpoint pass verifies.
 - Do NOT write a `step-{X.Y}-checks.md`. Do NOT create a `step-{X.Y}-artifacts/` folder. Verification is checkpoint-based.
-- Flip the `Status` cell of row `{X.Y}` in PLAN.md's Tasks table from `todo` to `done` and fill the `Commit` column with the short SHA as part of the same commit (amend if needed to capture the real SHA before push).
+- Commit the Step's implementation first. Capture its finalized short SHA, then
+  flip row `{X.Y}` from `todo` to `done`, place that SHA in the `Commit` column,
+  and land the table-only change in a subsequent
+  `docs(runs): record Step {X.Y} completion` commit. Never amend a commit to
+  embed its own SHA.
 - Do NOT rewrite `HANDOFF.md` at the per-Step level. Do NOT append to `NOTIFY.md` unless you hit a blocker, make a scope decision worth logging, or are delegating to another subagent.
 - Push after the commit so the remote always has the latest state.
 - Do NOT claim or release the PR's `in-progress` lock, and do NOT post the final summary PR comment. The main session owns both.
