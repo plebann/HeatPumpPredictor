@@ -115,6 +115,32 @@ def _state_value(state: Any) -> Any:
     return state.get("state") if isinstance(state, dict) else getattr(state, "state", None)
 
 
+def _timestamped_states(states: list[Any]) -> list[tuple[datetime, Any]]:
+    """Return Recorder states with usable timestamps in chronological order."""
+    timestamped: list[tuple[datetime, Any]] = []
+    for state in states:
+        timestamp = _state_timestamp(state)
+        if timestamp is not None:
+            timestamped.append((timestamp, state))
+    return sorted(timestamped, key=lambda item: item[0])
+
+
+def _weighted_state_segment(
+    state: Any, segment_start: datetime, segment_end: datetime
+) -> tuple[float, float]:
+    """Return weighted value and valid seconds for one state segment."""
+    if segment_end <= segment_start:
+        return 0.0, 0.0
+    try:
+        value = float(_state_value(state))
+    except (TypeError, ValueError):
+        return 0.0, 0.0
+    if not math.isfinite(value):
+        return 0.0, 0.0
+    seconds = (segment_end - segment_start).total_seconds()
+    return value * seconds, seconds
+
+
 def time_weighted_mean(
     states: list[Any], start: datetime, end: datetime
 ) -> tuple[float | None, float]:
@@ -124,27 +150,18 @@ def time_weighted_mean(
     if end <= start:
         return None, 0.0
 
-    ordered = sorted(
-        ((timestamp, state) for state in states if (timestamp := _state_timestamp(state))),
-        key=lambda item: item[0],
-    )
+    ordered = _timestamped_states(states)
     weighted = 0.0
     valid_seconds = 0.0
     for index, (timestamp, state) in enumerate(ordered):
         segment_start = max(timestamp, start)
         next_timestamp = ordered[index + 1][0] if index + 1 < len(ordered) else end
         segment_end = min(next_timestamp, end)
-        if segment_end <= segment_start:
-            continue
-        try:
-            value = float(_state_value(state))
-        except (TypeError, ValueError):
-            continue
-        if not math.isfinite(value):
-            continue
-        seconds = (segment_end - segment_start).total_seconds()
-        weighted += value * seconds
-        valid_seconds += seconds
+        segment_weight, segment_seconds = _weighted_state_segment(
+            state, segment_start, segment_end
+        )
+        weighted += segment_weight
+        valid_seconds += segment_seconds
 
     window_seconds = (end - start).total_seconds()
     coverage = valid_seconds / window_seconds
@@ -326,62 +343,96 @@ class ForecastValidationManager:
             if not isinstance(existing, dict):
                 existing = None
             target_at = candidate["target_at"]
-            if target_at + timedelta(hours=1) + VALIDATION_DELAY > now:
-                continue
-            same_snapshot = existing and (
-                existing.get("snapshot_hash") == candidate["snapshot_hash"]
-                and existing.get("fetched_at") == candidate["fetched_at"].isoformat()
-            )
-            if same_snapshot and existing.get("status") == "validated":
-                continue
-            if same_snapshot and existing.get("reason") != "recorder_unavailable":
-                continue
-            if (
-                existing
-                and now > target_at + timedelta(hours=1) + RECORDER_RETRY_WINDOW
-            ):
+            if not self._should_validate(existing, candidate, target_at, now):
                 continue
             history_entity = self._history_entity or candidate["weather_entity"]
             history_key = (history_entity, target_at)
             try:
-                cached_history = history_cache.get(history_key)
-                if cached_history is None:
-                    try:
-                        cached_history = await self._get_history(
-                            history_entity, target_at, target_at + timedelta(hours=1)
-                        )
-                    except Exception as err:
-                        cached_history = err
-                    history_cache[history_key] = cached_history
-                if isinstance(cached_history, Exception):
-                    raise cached_history
-                states = cached_history
+                states = await self._history_for_target(
+                    history_cache, history_entity, target_at
+                )
             except Exception:
                 _LOGGER.warning("Recorder history unavailable for %s", result_key, exc_info=True)
                 result = self._result(candidate, "unvalidated", "recorder_unavailable", now)
             else:
-                actual_mean, coverage = time_weighted_mean(
-                    states, target_at, target_at + timedelta(hours=1)
-                )
-                if actual_mean is None:
-                    reason = "insufficient_coverage" if states else "no_recorded_states"
-                    result = self._result(candidate, "unvalidated", reason, now)
-                    result["coverage"] = coverage
-                elif coverage < 0.60:
-                    result = self._result(candidate, "unvalidated", "insufficient_coverage", now)
-                    result["actual_mean"] = actual_mean
-                    result["coverage"] = coverage
-                else:
-                    result = self._result(candidate, "validated", None, now)
-                    result["actual_mean"] = actual_mean
-                    result["coverage"] = coverage
-                    result["difference"] = candidate["forecast_temperature"] - actual_mean
+                result = self._result_from_states(candidate, states, now)
             results[result_key] = result
             changed = True
         self._store.async_delay_save(lambda: self._data, 5)
         if changed:
-            for callback_fn in list(self._callbacks):
+            for callback_fn in tuple(self._callbacks):
                 callback_fn()
+
+    @staticmethod
+    def _should_validate(
+        existing: dict[str, Any] | None,
+        candidate: dict[str, Any],
+        target_at: datetime,
+        now: datetime,
+    ) -> bool:
+        """Return whether a candidate is due or needs a Recorder retry."""
+        if target_at + timedelta(hours=1) + VALIDATION_DELAY > now:
+            return False
+        same_snapshot = existing is not None and (
+            existing.get("snapshot_hash") == candidate["snapshot_hash"]
+            and existing.get("fetched_at") == candidate["fetched_at"].isoformat()
+        )
+        if same_snapshot and (
+            existing.get("status") == "validated"
+            or existing.get("reason") != "recorder_unavailable"
+        ):
+            return False
+        return not (
+            existing is not None
+            and now > target_at + timedelta(hours=1) + RECORDER_RETRY_WINDOW
+        )
+
+    async def _history_for_target(
+        self,
+        cache: dict[tuple[str, datetime], list[Any] | Exception],
+        entity: str,
+        target_at: datetime,
+    ) -> list[Any]:
+        """Read or reuse Recorder history for one actual-temperature window."""
+        cache_key = (entity, target_at)
+        if cache_key not in cache:
+            try:
+                cache[cache_key] = await self._get_history(
+                    entity, target_at, target_at + timedelta(hours=1)
+                )
+            except Exception as err:
+                cache[cache_key] = err
+        cached_history = cache[cache_key]
+        if isinstance(cached_history, Exception):
+            raise cached_history
+        return cached_history
+
+    @staticmethod
+    def _result_from_states(
+        candidate: dict[str, Any], states: list[Any], now: datetime
+    ) -> dict[str, Any]:
+        """Build a validation result from Recorder states."""
+        target_at = candidate["target_at"]
+        actual_mean, coverage = time_weighted_mean(
+            states, target_at, target_at + timedelta(hours=1)
+        )
+        if actual_mean is None:
+            reason = "insufficient_coverage" if states else "no_recorded_states"
+            result = ForecastValidationManager._result(candidate, "unvalidated", reason, now)
+            result["coverage"] = coverage
+            return result
+        if coverage < 0.60:
+            result = ForecastValidationManager._result(
+                candidate, "unvalidated", "insufficient_coverage", now
+            )
+            result["actual_mean"] = actual_mean
+            result["coverage"] = coverage
+            return result
+        result = ForecastValidationManager._result(candidate, "validated", None, now)
+        result["actual_mean"] = actual_mean
+        result["coverage"] = coverage
+        result["difference"] = candidate["forecast_temperature"] - actual_mean
+        return result
 
     async def _get_history(self, entity: str, start: datetime, end: datetime) -> list[Any]:
         value = self._history_source(entity, start, end)

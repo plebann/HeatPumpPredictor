@@ -300,10 +300,15 @@ def test_missing_recorder_entity_is_retryable() -> None:
             Mock(), "entry", history_source=AsyncMock(return_value={})
         )
 
+    async def assert_missing_entity() -> None:
+        with pytest.raises(RecorderHistoryUnavailable):
+            await manager._get_history(
+                "sensor.outdoor_temperature", START, START + timedelta(hours=1)
+            )
+
     import asyncio
 
-    with pytest.raises(RecorderHistoryUnavailable):
-        asyncio.run(manager._get_history("sensor.outdoor_temperature", START, START + timedelta(hours=1)))
+    asyncio.run(assert_missing_entity())
 
 
 def test_recorder_adapter_uses_executor_and_complete_history_options() -> None:
