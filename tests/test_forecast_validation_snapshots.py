@@ -76,15 +76,18 @@ def test_capture_deduplicates_content_and_appends_fetch_time() -> None:
 
 def test_capture_prunes_old_fetches() -> None:
     store = Mock()
+    store.async_save = AsyncMock()
     with patch("custom_components.heat_pump_predictor.forecast_validation.Store", return_value=store):
         manager = ForecastValidationManager(Mock(), "entry")
         asyncio.run(
             manager.async_capture(
                 "weather.home",
                 [{"datetime": "2026-01-01T12:00:00Z", "temperature": 2}],
-                FETCHED - timedelta(days=29),
+                FETCHED,
             )
         )
+        assert manager.data["snapshots"]
+        asyncio.run(manager.async_prune(FETCHED + timedelta(days=29)))
     assert manager.data["snapshots"] == {}
 
 
@@ -95,6 +98,27 @@ def test_load_ignores_damaged_store() -> None:
         manager = ForecastValidationManager(Mock(), "entry")
         asyncio.run(manager.async_load())
     assert manager.data == {"snapshots": {}, "results": {}}
+
+
+def test_load_drops_malformed_snapshot_and_allows_future_capture() -> None:
+    store = Mock()
+    store.async_load = AsyncMock(
+        return_value={
+            "snapshots": {"broken": None},
+            "results": {},
+        }
+    )
+    with patch("custom_components.heat_pump_predictor.forecast_validation.Store", return_value=store):
+        manager = ForecastValidationManager(Mock(), "entry")
+        asyncio.run(manager.async_load())
+        asyncio.run(
+            manager.async_capture(
+                "weather.home",
+                [{"datetime": "2026-01-01T12:00:00Z", "temperature": 2}],
+                FETCHED,
+            )
+        )
+    assert len(manager.data["snapshots"]) == 1
 
 
 def test_capture_store_failure_does_not_change_forecast_cache() -> None:

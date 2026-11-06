@@ -105,8 +105,13 @@ class ForecastValidationManager:
         try:
             loaded = await self._store.async_load()
             if isinstance(loaded, dict) and isinstance(loaded.get("snapshots"), dict):
+                snapshots = {
+                    content_hash: record
+                    for content_hash, record in loaded["snapshots"].items()
+                    if isinstance(content_hash, str) and self._valid_snapshot(record)
+                }
                 self._data = {
-                    "snapshots": loaded["snapshots"],
+                    "snapshots": snapshots,
                     "results": loaded.get("results", {})
                     if isinstance(loaded.get("results", {}), dict)
                     else {},
@@ -144,17 +149,51 @@ class ForecastValidationManager:
 
     async def async_save(self) -> None:
         """Flush the current snapshot data to Home Assistant storage."""
+        self._prune(datetime.now(timezone.utc))
         await self._store.async_save(self._data)
 
     async def async_prune(self, now: datetime) -> None:
         """Remove records outside the retention window and save the result."""
-        self._prune(as_utc(now))
-        await self.async_save()
+        now = as_utc(now)
+        self._prune(now)
+        await self._store.async_save(self._data)
+
+    @staticmethod
+    def _valid_snapshot(record: Any) -> bool:
+        """Check the nested shape needed by capture and pruning."""
+        if not isinstance(record, dict) or not isinstance(record.get("weather_entity"), str):
+            return False
+        entries = record.get("entries")
+        fetched_at = record.get("fetched_at")
+        if not isinstance(entries, list) or not isinstance(fetched_at, list) or not fetched_at:
+            return False
+        if any(parse_datetime(value) is None for value in fetched_at):
+            return False
+        for entry in entries:
+            if not isinstance(entry, list) or len(entry) != 2:
+                return False
+            target_at = parse_datetime(entry[0])
+            try:
+                temperature = float(entry[1])
+            except (TypeError, ValueError):
+                return False
+            if (
+                target_at is None
+                or target_at.minute
+                or target_at.second
+                or target_at.microsecond
+                or not math.isfinite(temperature)
+            ):
+                return False
+        return True
 
     def _prune(self, now: datetime) -> None:
         cutoff = now - RETENTION
         snapshots = self._data.setdefault("snapshots", {})
         for content_hash, record in list(snapshots.items()):
+            if not self._valid_snapshot(record):
+                del snapshots[content_hash]
+                continue
             timestamps = [
                 timestamp
                 for timestamp in record.get("fetched_at", [])
