@@ -281,45 +281,79 @@ def aggregate_diagnostics(
     validated_windows: set[tuple[str, str]] = set()
 
     for result_key, result in results.items():
-        if not isinstance(result, dict):
+        context = _diagnostic_result_context(result_key, result, cutoff, now, weather_entity)
+        if context is None:
             continue
-        target_at = parse_datetime(result.get("target_at"))
-        if target_at is None or target_at < cutoff or target_at > now:
-            continue
-        entity = result.get("weather_entity")
-        if not isinstance(entity, str):
-            entity = result_key.split("|", 1)[0]
-        if weather_entity is not None and entity != weather_entity:
-            continue
-        target_key = target_at.isoformat()
-        if result.get("status") == "validated":
-            validated_windows.add((entity, target_key))
-            range_key = result.get("range")
-            try:
-                difference = float(result.get("difference"))
-            except (TypeError, ValueError):
-                continue
-            if range_key in metrics and math.isfinite(difference):
-                metrics[range_key].append(difference)
-        else:
-            reason = result.get("reason") or "unknown"
-            unvalidated[reason] = unvalidated.get(reason, 0) + 1
+        entity, target_key = context
+        _add_diagnostic_result(
+            result, entity, target_key, metrics, validated_windows, unvalidated
+        )
 
     return (
         len(validated_windows),
-        {
-            range_key: {
-                "windows": len(values),
-                "mean_difference": sum(values) / len(values) if values else None,
-                "mae": sum(abs(value) for value in values) / len(values) if values else None,
-                "rmse": math.sqrt(sum(value * value for value in values) / len(values))
-                if values
-                else None,
-            }
-            for range_key, values in metrics.items()
-        },
+        _build_metrics(metrics),
         unvalidated,
     )
+
+
+def _diagnostic_result_context(
+    result_key: str,
+    result: Any,
+    cutoff: datetime,
+    now: datetime,
+    weather_entity: str | None,
+) -> tuple[str, str] | None:
+    """Return the entity and target key when a result belongs in the window."""
+    if not isinstance(result, dict):
+        return None
+    target_at = parse_datetime(result.get("target_at"))
+    if target_at is None or target_at < cutoff or target_at > now:
+        return None
+    entity = result.get("weather_entity")
+    entity = entity if isinstance(entity, str) else result_key.split("|", 1)[0]
+    if weather_entity is not None and entity != weather_entity:
+        return None
+    return entity, target_at.isoformat()
+
+
+def _add_diagnostic_result(
+    result: dict[str, Any],
+    entity: str,
+    target_key: str,
+    metrics: dict[str, list[float]],
+    validated_windows: set[tuple[str, str]],
+    unvalidated: dict[str, int],
+) -> None:
+    """Add one result to validated metrics or unvalidated counters."""
+    if result.get("status") != "validated":
+        reason = result.get("reason") or "unknown"
+        unvalidated[reason] = unvalidated.get(reason, 0) + 1
+        return
+    validated_windows.add((entity, target_key))
+    range_key = result.get("range")
+    try:
+        difference = float(result.get("difference"))
+    except (TypeError, ValueError):
+        return
+    if range_key in metrics and math.isfinite(difference):
+        metrics[range_key].append(difference)
+
+
+def _build_metrics(
+    grouped: dict[str, list[float]],
+) -> dict[str, dict[str, float | int | None]]:
+    """Build the public metric shape from differences grouped by range."""
+    return {
+        range_key: {
+            "windows": len(values),
+            "mean_difference": sum(values) / len(values) if values else None,
+            "mae": sum(abs(value) for value in values) / len(values) if values else None,
+            "rmse": math.sqrt(sum(value * value for value in values) / len(values))
+            if values
+            else None,
+        }
+        for range_key, values in grouped.items()
+    }
 
 
 class ForecastValidationManager:
