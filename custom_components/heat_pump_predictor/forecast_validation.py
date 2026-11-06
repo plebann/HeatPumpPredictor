@@ -5,12 +5,18 @@ import hashlib
 import json
 import logging
 import math
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from inspect import isawaitable
 from typing import Any
 
 from homeassistant.helpers.storage import Store
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class RecorderHistoryUnavailable(RuntimeError):
+    """Recorder did not return history for the requested entity."""
 
 STORAGE_VERSION = 1
 STORAGE_KEY = "heat_pump_predictor.forecast_validation"
@@ -18,6 +24,9 @@ RETENTION = timedelta(days=28)
 MAX_HORIZON = timedelta(hours=48)
 
 HORIZON_RANGES = ("0_3h", "3_6h", "6_12h", "12_24h", "24_48h")
+VALIDATION_DELAY = timedelta(minutes=10)
+RECORDER_RETRY_WINDOW = timedelta(hours=24)
+METRICS_WINDOW = timedelta(days=14)
 
 
 def as_utc(value: datetime) -> datetime:
@@ -88,12 +97,145 @@ def horizon_range(horizon: timedelta | float) -> str | None:
     return "24_48h"
 
 
+def _state_timestamp(state: Any) -> datetime | None:
+    """Return the timestamp attached to a Recorder state."""
+    value = state.get("last_changed") if isinstance(state, dict) else getattr(state, "last_changed", None)
+    if value is None and isinstance(state, dict):
+        value = state.get("last_updated")
+    if value is None:
+        value = getattr(state, "last_updated", None)
+    if isinstance(value, datetime):
+        return as_utc(value)
+    if isinstance(value, str):
+        return parse_datetime(value)
+    return None
+
+
+def _state_value(state: Any) -> Any:
+    return state.get("state") if isinstance(state, dict) else getattr(state, "state", None)
+
+
+def time_weighted_mean(
+    states: list[Any], start: datetime, end: datetime
+) -> tuple[float | None, float]:
+    """Calculate a state-time weighted mean and valid coverage for an interval."""
+    start = as_utc(start)
+    end = as_utc(end)
+    if end <= start:
+        return None, 0.0
+
+    ordered = sorted(
+        ((timestamp, state) for state in states if (timestamp := _state_timestamp(state))),
+        key=lambda item: item[0],
+    )
+    weighted = 0.0
+    valid_seconds = 0.0
+    for index, (timestamp, state) in enumerate(ordered):
+        segment_start = max(timestamp, start)
+        next_timestamp = ordered[index + 1][0] if index + 1 < len(ordered) else end
+        segment_end = min(next_timestamp, end)
+        if segment_end <= segment_start:
+            continue
+        try:
+            value = float(_state_value(state))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(value):
+            continue
+        seconds = (segment_end - segment_start).total_seconds()
+        weighted += value * seconds
+        valid_seconds += seconds
+
+    window_seconds = (end - start).total_seconds()
+    coverage = valid_seconds / window_seconds
+    return (weighted / valid_seconds if valid_seconds else None), coverage
+
+
+def select_representative_snapshots(
+    snapshots: dict[str, Any],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """Select the last eligible fetch for each entity, target, and horizon range."""
+    selected: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for content_hash, record in snapshots.items():
+        if not isinstance(record, dict):
+            continue
+        entity = record.get("weather_entity")
+        entries = record.get("entries", [])
+        if not isinstance(entity, str) or not isinstance(entries, list):
+            continue
+        for fetched_value in record.get("fetched_at", []):
+            fetched_at = parse_datetime(fetched_value)
+            if fetched_at is None:
+                continue
+            for entry in entries:
+                if not isinstance(entry, list) or len(entry) != 2:
+                    continue
+                target_at = parse_datetime(entry[0])
+                if target_at is None or fetched_at >= target_at:
+                    continue
+                range_key = horizon_range(target_at - fetched_at)
+                if range_key is None:
+                    continue
+                key = (entity, target_at.isoformat(), range_key)
+                candidate = {
+                    "snapshot_hash": content_hash,
+                    "weather_entity": entity,
+                    "target_at": target_at,
+                    "fetched_at": fetched_at,
+                    "horizon_hours": (target_at - fetched_at).total_seconds() / 3600,
+                    "forecast_temperature": float(entry[1]),
+                }
+                previous = selected.get(key)
+                if previous is None or fetched_at > previous["fetched_at"]:
+                    selected[key] = candidate
+    return selected
+
+
+def aggregate_metrics(
+    results: dict[str, Any], now: datetime, window: timedelta = METRICS_WINDOW
+) -> dict[str, dict[str, float | int | None]]:
+    """Aggregate validated results within the requested target-time window."""
+    now = as_utc(now)
+    cutoff = now - window
+    grouped: dict[str, list[float]] = {range_key: [] for range_key in HORIZON_RANGES}
+    for result in results.values():
+        if not isinstance(result, dict) or result.get("status") != "validated":
+            continue
+        target_at = parse_datetime(result.get("target_at"))
+        difference = result.get("difference")
+        range_key = result.get("range")
+        if target_at is None or target_at < cutoff or target_at > now or range_key not in grouped:
+            continue
+        try:
+            difference = float(difference)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(difference):
+            grouped[range_key].append(difference)
+    return {
+        range_key: {
+            "windows": len(values),
+            "mean_difference": sum(values) / len(values) if values else None,
+            "mae": sum(abs(value) for value in values) / len(values) if values else None,
+            "rmse": math.sqrt(sum(value * value for value in values) / len(values)) if values else None,
+        }
+        for range_key, values in grouped.items()
+    }
+
+
 class ForecastValidationManager:
     """Own the separately-retained forecast snapshot store."""
 
-    def __init__(self, hass: Any, entry_id: str) -> None:
+    def __init__(
+        self,
+        hass: Any,
+        entry_id: str,
+        history_source: Callable[[str, datetime, datetime], Any] | None = None,
+    ) -> None:
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}.{entry_id}")
         self._data: dict[str, Any] = {"snapshots": {}, "results": {}}
+        self._history_source = history_source or self._async_recorder_history
+        self._callbacks: list[Callable[[], None]] = []
 
     @property
     def data(self) -> dict[str, Any]:
@@ -157,6 +299,117 @@ class ForecastValidationManager:
         now = as_utc(now)
         self._prune(now)
         await self._store.async_save(self._data)
+
+    def async_register_update_callback(self, callback_fn: Callable[[], None]) -> Callable[[], None]:
+        """Register a callback invoked after validation changes the store."""
+        self._callbacks.append(callback_fn)
+
+        def unsubscribe() -> None:
+            if callback_fn in self._callbacks:
+                self._callbacks.remove(callback_fn)
+
+        return unsubscribe
+
+    async def async_validate_due(self, now: datetime) -> None:
+        """Validate completed forecast windows against Recorder history."""
+        now = as_utc(now)
+        self._prune(now)
+        selected = select_representative_snapshots(self._data.get("snapshots", {}))
+        results = self._data.setdefault("results", {})
+        changed = False
+        for key, candidate in selected.items():
+            result_key = "|".join((key[0], key[1], key[2]))
+            existing = results.get(result_key)
+            target_at = candidate["target_at"]
+            if target_at + timedelta(hours=1) + VALIDATION_DELAY > now:
+                continue
+            same_snapshot = existing and (
+                existing.get("snapshot_hash") == candidate["snapshot_hash"]
+                and existing.get("fetched_at") == candidate["fetched_at"].isoformat()
+            )
+            if same_snapshot and existing.get("status") == "validated":
+                continue
+            if same_snapshot and existing.get("reason") != "recorder_unavailable":
+                continue
+            if (
+                existing
+                and now > target_at + timedelta(hours=1) + RECORDER_RETRY_WINDOW
+            ):
+                continue
+            try:
+                states = await self._get_history(
+                    candidate["weather_entity"], target_at, target_at + timedelta(hours=1)
+                )
+            except Exception:
+                _LOGGER.warning("Recorder history unavailable for %s", result_key, exc_info=True)
+                result = self._result(candidate, "unvalidated", "recorder_unavailable", now)
+            else:
+                actual_mean, coverage = time_weighted_mean(
+                    states, target_at, target_at + timedelta(hours=1)
+                )
+                if actual_mean is None:
+                    result = self._result(candidate, "unvalidated", "no_recorded_states", now)
+                    result["coverage"] = coverage
+                elif coverage < 0.60:
+                    result = self._result(candidate, "unvalidated", "insufficient_coverage", now)
+                    result["actual_mean"] = actual_mean
+                    result["coverage"] = coverage
+                else:
+                    result = self._result(candidate, "validated", None, now)
+                    result["actual_mean"] = actual_mean
+                    result["coverage"] = coverage
+                    result["difference"] = candidate["forecast_temperature"] - actual_mean
+            results[result_key] = result
+            changed = True
+        self._store.async_delay_save(lambda: self._data, 5)
+        if changed:
+            for callback_fn in list(self._callbacks):
+                callback_fn()
+
+    async def _get_history(self, entity: str, start: datetime, end: datetime) -> list[Any]:
+        value = self._history_source(entity, start, end)
+        if isawaitable(value):
+            value = await value
+        if isinstance(value, dict):
+            if entity not in value:
+                raise RecorderHistoryUnavailable(entity)
+            value = value[entity]
+        return value if isinstance(value, list) else []
+
+    async def _async_recorder_history(self, entity: str, start: datetime, end: datetime) -> dict[str, list[Any]]:
+        """Read Recorder history without blocking the Home Assistant loop."""
+        from homeassistant.components.recorder import get_instance, history
+
+        recorder = get_instance(self._store.hass)
+        return await recorder.async_add_executor_job(
+            history.get_significant_states,
+            self._store.hass,
+            start,
+            end,
+            [entity],
+            None,
+            True,
+            False,
+            False,
+            True,
+        )
+
+    @staticmethod
+    def _result(candidate: dict[str, Any], status: str, reason: str | None, now: datetime) -> dict[str, Any]:
+        return {
+            "snapshot_hash": candidate["snapshot_hash"],
+            "fetched_at": candidate["fetched_at"].isoformat(),
+            "target_at": candidate["target_at"].isoformat(),
+            "range": horizon_range(candidate["horizon_hours"]),
+            "horizon_hours": candidate["horizon_hours"],
+            "forecast_temperature": candidate["forecast_temperature"],
+            "status": status,
+            "reason": reason,
+            "actual_mean": None,
+            "coverage": None,
+            "difference": None,
+            "validated_at": now.isoformat(),
+        }
 
     @staticmethod
     def _valid_snapshot(record: Any) -> bool:
