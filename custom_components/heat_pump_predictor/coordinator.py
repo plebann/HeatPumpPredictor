@@ -131,8 +131,8 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._save_data()
         try:
             await self.forecast_validation.async_save()
-        except Exception as err:
-            _LOGGER.error("Failed to save forecast validation data: %s", err)
+        except Exception:
+            _LOGGER.exception("Failed to save forecast validation data")
         _LOGGER.info("Saved heat pump data to storage")
 
         self._async_unsubscribe_state_listener()
@@ -241,8 +241,8 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._forecast = forecast
         try:
             await self.forecast_validation.async_capture(weather_entity, forecast, dt_util.utcnow())
-        except Exception as err:
-            _LOGGER.error("Failed to capture forecast validation snapshot: %s", err)
+        except Exception:
+            _LOGGER.exception("Failed to capture forecast validation snapshot")
         self.async_set_updated_data(self._build_coordinator_data())
         return forecast
 
