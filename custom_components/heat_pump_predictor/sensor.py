@@ -12,6 +12,7 @@ from .const import CONF_WEATHER_ENTITY, DOMAIN
 from .coordinator import HeatPumpCoordinator
 from .sensors import (
     HeatPumpForecastSensor,
+    ForecastTemperatureValidationSensor,
     HeatPumpPerformanceCurveSensor,
     HeatPumpSensorBase,
     ScheduledForecastEnergySensor,
@@ -66,6 +67,7 @@ async def async_setup_entry(
     weather_entity = _resolve_weather_entity(hass, entry)
     if weather_entity:
         entities.append(HeatPumpForecastSensor(hass, coordinator, weather_entity))
+        entities.append(ForecastTemperatureValidationSensor(hass, coordinator, weather_entity))
 
     entities.extend(
         _build_scheduled_forecast_entities(hass, coordinator)

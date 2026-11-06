@@ -7,6 +7,7 @@ import pytest
 from custom_components.heat_pump_predictor.forecast_validation import (
     ForecastValidationManager,
     RecorderHistoryUnavailable,
+    aggregate_diagnostics,
     aggregate_metrics,
     select_representative_snapshots,
     time_weighted_mean,
@@ -86,6 +87,41 @@ def test_aggregate_metrics_uses_fourteen_day_target_window() -> None:
         "rmse": pytest.approx(5**0.5 / 2**0.5),
     }
     assert metrics["24_48h"]["windows"] == 0
+
+
+def test_aggregate_diagnostics_counts_unique_windows_and_unvalidated_reasons() -> None:
+    now = START + timedelta(days=1)
+    target = now - timedelta(hours=2)
+    results = {
+        "weather.home|target|0_3h": {
+            "weather_entity": "weather.home",
+            "status": "validated",
+            "target_at": target.isoformat(),
+            "range": "0_3h",
+            "difference": 2,
+        },
+        "weather.home|target|3_6h": {
+            "weather_entity": "weather.home",
+            "status": "validated",
+            "target_at": target.isoformat(),
+            "range": "3_6h",
+            "difference": 4,
+        },
+        "weather.home|other|0_3h": {
+            "weather_entity": "weather.home",
+            "status": "unvalidated",
+            "target_at": (now - timedelta(hours=1)).isoformat(),
+            "range": "0_3h",
+            "reason": "insufficient_coverage",
+        },
+    }
+
+    total, ranges, unvalidated = aggregate_diagnostics(results, now, "weather.home")
+
+    assert total == 1
+    assert ranges["0_3h"]["windows"] == 1
+    assert ranges["3_6h"]["mean_difference"] == pytest.approx(4)
+    assert unvalidated == {"insufficient_coverage": 1}
 
 
 def test_validate_due_retries_recorder_unavailable() -> None:

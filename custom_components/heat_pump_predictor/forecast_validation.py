@@ -267,6 +267,61 @@ def aggregate_metrics(
     }
 
 
+def aggregate_diagnostics(
+    results: dict[str, Any],
+    now: datetime,
+    weather_entity: str | None = None,
+    window: timedelta = METRICS_WINDOW,
+) -> tuple[int, dict[str, dict[str, float | int | None]], dict[str, int]]:
+    """Aggregate sensor data, counting each validated target window once."""
+    now = as_utc(now)
+    cutoff = now - window
+    metrics: dict[str, list[float]] = {range_key: [] for range_key in HORIZON_RANGES}
+    unvalidated: dict[str, int] = {}
+    validated_windows: set[tuple[str, str]] = set()
+
+    for result_key, result in results.items():
+        if not isinstance(result, dict):
+            continue
+        target_at = parse_datetime(result.get("target_at"))
+        if target_at is None or target_at < cutoff or target_at > now:
+            continue
+        entity = result.get("weather_entity")
+        if not isinstance(entity, str):
+            entity = result_key.split("|", 1)[0]
+        if weather_entity is not None and entity != weather_entity:
+            continue
+        target_key = target_at.isoformat()
+        if result.get("status") == "validated":
+            validated_windows.add((entity, target_key))
+            range_key = result.get("range")
+            try:
+                difference = float(result.get("difference"))
+            except (TypeError, ValueError):
+                continue
+            if range_key in metrics and math.isfinite(difference):
+                metrics[range_key].append(difference)
+        else:
+            reason = result.get("reason") or "unknown"
+            unvalidated[reason] = unvalidated.get(reason, 0) + 1
+
+    return (
+        len(validated_windows),
+        {
+            range_key: {
+                "windows": len(values),
+                "mean_difference": sum(values) / len(values) if values else None,
+                "mae": sum(abs(value) for value in values) / len(values) if values else None,
+                "rmse": math.sqrt(sum(value * value for value in values) / len(values))
+                if values
+                else None,
+            }
+            for range_key, values in metrics.items()
+        },
+        unvalidated,
+    )
+
+
 class ForecastValidationManager:
     """Own the separately-retained forecast snapshot store."""
 
@@ -505,6 +560,7 @@ class ForecastValidationManager:
             "snapshot_hash": candidate["snapshot_hash"],
             "fetched_at": candidate["fetched_at"].isoformat(),
             "target_at": candidate["target_at"].isoformat(),
+            "weather_entity": candidate["weather_entity"],
             "range": horizon_range(candidate["horizon_hours"]),
             "horizon_hours": candidate["horizon_hours"],
             "forecast_temperature": candidate["forecast_temperature"],
