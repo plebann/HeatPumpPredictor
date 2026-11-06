@@ -174,38 +174,65 @@ def select_representative_snapshots(
     """Select the last eligible fetch for each entity, target, and horizon range."""
     selected: dict[tuple[str, str, str], dict[str, Any]] = {}
     for content_hash, record in snapshots.items():
-        if not isinstance(record, dict):
-            continue
-        entity = record.get("weather_entity")
-        entries = record.get("entries", [])
-        if not isinstance(entity, str) or not isinstance(entries, list):
-            continue
-        for fetched_value in record.get("fetched_at", []):
-            fetched_at = parse_datetime(fetched_value)
-            if fetched_at is None:
-                continue
-            for entry in entries:
-                if not isinstance(entry, list) or len(entry) != 2:
-                    continue
-                target_at = parse_datetime(entry[0])
-                if target_at is None or fetched_at >= target_at:
-                    continue
-                range_key = horizon_range(target_at - fetched_at)
-                if range_key is None:
-                    continue
-                key = (entity, target_at.isoformat(), range_key)
-                candidate = {
-                    "snapshot_hash": content_hash,
-                    "weather_entity": entity,
-                    "target_at": target_at,
-                    "fetched_at": fetched_at,
-                    "horizon_hours": (target_at - fetched_at).total_seconds() / 3600,
-                    "forecast_temperature": float(entry[1]),
-                }
-                previous = selected.get(key)
-                if previous is None or fetched_at > previous["fetched_at"]:
-                    selected[key] = candidate
+        for candidate in _snapshot_candidates(content_hash, record):
+            key = (
+                candidate["weather_entity"],
+                candidate["target_at"].isoformat(),
+                horizon_range(candidate["horizon_hours"]),
+            )
+            previous = selected.get(key)
+            if previous is None or candidate["fetched_at"] > previous["fetched_at"]:
+                selected[key] = candidate
     return selected
+
+
+def _snapshot_candidates(content_hash: str, record: Any) -> list[dict[str, Any]]:
+    """Return eligible candidates from one persisted snapshot record."""
+    if not isinstance(record, dict):
+        return []
+    entity = record.get("weather_entity")
+    entries = record.get("entries", [])
+    if not isinstance(entity, str) or not isinstance(entries, list):
+        return []
+    candidates: list[dict[str, Any]] = []
+    for fetched_value in record.get("fetched_at", []):
+        fetched_at = parse_datetime(fetched_value)
+        if fetched_at is None:
+            continue
+        candidates.extend(
+            _candidates_for_fetch(content_hash, entity, entries, fetched_at)
+        )
+    return candidates
+
+
+def _candidates_for_fetch(
+    content_hash: str,
+    entity: str,
+    entries: list[Any],
+    fetched_at: datetime,
+) -> list[dict[str, Any]]:
+    """Return eligible target candidates for one fetch timestamp."""
+    candidates: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, list) or len(entry) != 2:
+            continue
+        target_at = parse_datetime(entry[0])
+        if target_at is None or fetched_at >= target_at:
+            continue
+        horizon_hours = (target_at - fetched_at).total_seconds() / 3600
+        if horizon_range(horizon_hours) is None:
+            continue
+        candidates.append(
+            {
+                "snapshot_hash": content_hash,
+                "weather_entity": entity,
+                "target_at": target_at,
+                "fetched_at": fetched_at,
+                "horizon_hours": horizon_hours,
+                "forecast_temperature": float(entry[1]),
+            }
+        )
+    return candidates
 
 
 def aggregate_metrics(
@@ -346,22 +373,32 @@ class ForecastValidationManager:
             if not self._should_validate(existing, candidate, target_at, now):
                 continue
             history_entity = self._history_entity or candidate["weather_entity"]
-            history_key = (history_entity, target_at)
-            try:
-                states = await self._history_for_target(
-                    history_cache, history_entity, target_at
-                )
-            except Exception:
-                _LOGGER.warning("Recorder history unavailable for %s", result_key, exc_info=True)
-                result = self._result(candidate, "unvalidated", "recorder_unavailable", now)
-            else:
-                result = self._result_from_states(candidate, states, now)
+            result = await self._validate_candidate(
+                candidate, result_key, history_cache, history_entity, now
+            )
             results[result_key] = result
             changed = True
         self._store.async_delay_save(lambda: self._data, 5)
         if changed:
             for callback_fn in tuple(self._callbacks):
                 callback_fn()
+
+    async def _validate_candidate(
+        self,
+        candidate: dict[str, Any],
+        result_key: str,
+        history_cache: dict[tuple[str, datetime], list[Any] | Exception],
+        history_entity: str,
+        now: datetime,
+    ) -> dict[str, Any]:
+        """Validate one candidate and convert Recorder failures to a result."""
+        target_at = candidate["target_at"]
+        try:
+            states = await self._history_for_target(history_cache, history_entity, target_at)
+        except Exception:
+            _LOGGER.warning("Recorder history unavailable for %s", result_key, exc_info=True)
+            return self._result(candidate, "unvalidated", "recorder_unavailable", now)
+        return self._result_from_states(candidate, states, now)
 
     @staticmethod
     def _should_validate(
@@ -515,11 +552,11 @@ class ForecastValidationManager:
             if not self._valid_snapshot(record):
                 del snapshots[content_hash]
                 continue
-            timestamps = [
-                timestamp
-                for timestamp in record.get("fetched_at", [])
-                if (parsed := parse_datetime(timestamp)) is not None and parsed >= cutoff
-            ]
+            timestamps = []
+            for timestamp in record.get("fetched_at", []):
+                parsed = parse_datetime(timestamp)
+                if parsed is not None and parsed >= cutoff:
+                    timestamps.append(timestamp)
             if timestamps:
                 record["fetched_at"] = timestamps
             else:
@@ -529,6 +566,7 @@ class ForecastValidationManager:
             if not isinstance(result, dict):
                 del results[key]
                 continue
-            target_at = parse_datetime(result.get("target_at"))
+            target_value = result.get("target_at")
+            target_at = parse_datetime(target_value)
             if target_at is not None and target_at < cutoff:
                 del results[key]
