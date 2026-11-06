@@ -547,6 +547,11 @@ class ForecastValidationManager:
 
     def _prune(self, now: datetime) -> None:
         cutoff = now - RETENTION
+        self._prune_snapshots(cutoff)
+        self._prune_results(cutoff)
+
+    def _prune_snapshots(self, cutoff: datetime) -> None:
+        """Remove malformed and expired snapshot records."""
         snapshots = self._data.setdefault("snapshots", {})
         for content_hash, record in list(snapshots.items()):
             if not self._valid_snapshot(record):
@@ -561,6 +566,9 @@ class ForecastValidationManager:
                 record["fetched_at"] = timestamps
             else:
                 del snapshots[content_hash]
+
+    def _prune_results(self, cutoff: datetime) -> None:
+        """Remove malformed and expired validation results."""
         results = self._data.setdefault("results", {})
         for key, result in list(results.items()):
             if not isinstance(result, dict):

@@ -301,10 +301,13 @@ def test_missing_recorder_entity_is_retryable() -> None:
         )
 
     async def assert_missing_entity() -> None:
-        with pytest.raises(RecorderHistoryUnavailable):
+        try:
             await manager._get_history(
                 "sensor.outdoor_temperature", START, START + timedelta(hours=1)
             )
+        except RecorderHistoryUnavailable:
+            return
+        pytest.fail("missing Recorder entity did not raise RecorderHistoryUnavailable")
 
     import asyncio
 
