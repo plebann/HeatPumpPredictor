@@ -24,6 +24,7 @@ from .calculator import HeatPumpCalculator
 from .const import DOMAIN, UPDATE_INTERVAL, CONF_ENERGY_SENSOR, CONF_RUNNING_SENSOR, CONF_TEMPERATURE_SENSOR
 from .data_manager import HeatPumpDataManager
 from .forecast_energy import ForecastEnergyCalculationError, ForecastEnergyCalculator
+from .forecast_validation import ForecastValidationManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,6 +70,7 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._unsub_stop_listener: Callable[[], None] | None = None
         self._shutdown = False
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}.{entry.entry_id}")
+        self.forecast_validation = ForecastValidationManager(hass, entry.entry_id)
         self._save_debounce_seconds = 5
         self._forecast: list[dict[str, Any]] | None = None
         self._bucket_observed_callbacks: list[Callable[[int], None]] = []
@@ -110,6 +112,7 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if data := await self._store.async_load():
             self.data_manager.from_dict(data)
             _LOGGER.info("Loaded saved heat pump data from storage")
+        await self.forecast_validation.async_load()
 
         await self.async_config_entry_first_refresh()
         self._unsub_state_listener = async_track_state_change_event(
@@ -126,6 +129,10 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._shutdown = True
 
         await self._save_data()
+        try:
+            await self.forecast_validation.async_save()
+        except Exception as err:
+            _LOGGER.error("Failed to save forecast validation data: %s", err)
         _LOGGER.info("Saved heat pump data to storage")
 
         self._async_unsubscribe_state_listener()
@@ -232,6 +239,10 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             forecast = []
 
         self._forecast = forecast
+        try:
+            await self.forecast_validation.async_capture(weather_entity, forecast, dt_util.utcnow())
+        except Exception as err:
+            _LOGGER.error("Failed to capture forecast validation snapshot: %s", err)
         self.async_set_updated_data(self._build_coordinator_data())
         return forecast
 
