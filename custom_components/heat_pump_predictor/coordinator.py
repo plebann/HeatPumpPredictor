@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Callable
 
 from homeassistant.config_entries import ConfigEntry
@@ -15,7 +16,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, Event, State, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_track_state_change_event, async_track_time_change
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -68,9 +69,12 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._temperature_entity = entry.data[CONF_TEMPERATURE_SENSOR]
         self._unsub_state_listener: Callable[[], None] | None = None
         self._unsub_stop_listener: Callable[[], None] | None = None
+        self._unsub_validation_schedule: Callable[[], None] | None = None
         self._shutdown = False
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}.{entry.entry_id}")
-        self.forecast_validation = ForecastValidationManager(hass, entry.entry_id)
+        self.forecast_validation = ForecastValidationManager(
+            hass, entry.entry_id, history_entity=self._temperature_entity
+        )
         self._save_debounce_seconds = 5
         self._forecast: list[dict[str, Any]] | None = None
         self._bucket_observed_callbacks: list[Callable[[int], None]] = []
@@ -121,6 +125,9 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._unsub_stop_listener = self.hass.bus.async_listen_once(
             EVENT_HOMEASSISTANT_STOP, self._handle_hass_stop
         )
+        self._unsub_validation_schedule = async_track_time_change(
+            self.hass, self._handle_validation_schedule, minute=10, second=0
+        )
 
     async def async_shutdown(self) -> None:
         # Save data before shutdown
@@ -137,6 +144,7 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._async_unsubscribe_state_listener()
         self._async_unsubscribe_stop_listener()
+        self._async_unsubscribe_validation_schedule()
 
     def _async_unsubscribe_state_listener(self) -> None:
         """Safely remove state change listener."""
@@ -157,6 +165,17 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except ValueError:
             _LOGGER.debug("Stop listener already removed during shutdown", exc_info=True)
         self._unsub_stop_listener = None
+
+    def _async_unsubscribe_validation_schedule(self) -> None:
+        """Safely remove the hourly forecast validation schedule."""
+        if not self._unsub_validation_schedule:
+            return
+        self._unsub_validation_schedule()
+        self._unsub_validation_schedule = None
+
+    async def _handle_validation_schedule(self, _now: datetime) -> None:
+        """Validate forecast windows after Recorder has committed their history."""
+        await self.forecast_validation.async_validate_due(dt_util.utcnow())
 
     async def _save_data(self) -> None:
         """Save bucket data to storage."""
@@ -194,6 +213,10 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _handle_hass_stop(self, event: Event) -> None:
         """Handle Home Assistant stop to flush data."""
         await self._save_data()
+        try:
+            await self.forecast_validation.async_save()
+        except Exception:
+            _LOGGER.exception("Failed to save forecast validation data during shutdown")
 
     @callback
     def _handle_state_change(self, event: Event) -> None:
