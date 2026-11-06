@@ -72,6 +72,7 @@ while [ $# -gt 0 ]; do
 done
 case "$GAP_MINUTES" in
   ''|*[!0-9]*) echo "classify-runs: --gap-minutes must be a whole number of minutes" >&2; exit 2 ;;
+  *) ;;
 esac
 
 command -v jq >/dev/null 2>&1 || {
@@ -82,6 +83,7 @@ command -v jq >/dev/null 2>&1 || {
 input=$(cat)
 case "$input" in
   '') echo "classify-runs: stdin was empty; expected a JSON array of pull requests" >&2; exit 2 ;;
+  *) ;;
 esac
 
 printf '%s' "$input" | jq --arg gapminutes "$GAP_MINUTES" --arg inprogress "$IN_PROGRESS_LABEL" '
