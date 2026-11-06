@@ -207,3 +207,8 @@ marimo/_lsp/
 __marimo__/
 
 .copilot-tracking/
+
+# Open Mercato QA runtime artifacts (generated per run)
+.ai/qa/artifacts_*/
+.ai/qa/test-env.json
+.ai/qa/test-env.env
