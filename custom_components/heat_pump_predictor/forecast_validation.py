@@ -452,7 +452,6 @@ class ForecastValidationManager:
         selected = select_representative_snapshots(self._data.get("snapshots", {}))
         results = self._data.setdefault("results", {})
         history_cache: dict[tuple[str, datetime], list[Any] | Exception] = {}
-        changed = False
         for key, candidate in selected.items():
             result_key = "|".join((key[0], key[1], key[2]))
             existing = results.get(result_key)
@@ -466,11 +465,11 @@ class ForecastValidationManager:
                 candidate, result_key, history_cache, history_entity, now
             )
             results[result_key] = result
-            changed = True
         self._store.async_delay_save(lambda: self._data, 5)
-        if changed:
-            for callback_fn in tuple(self._callbacks):
-                callback_fn()
+        # Notify every scheduled tick so rolling 14-day aggregates expire old
+        # samples even when no new validation result was written.
+        for callback_fn in tuple(self._callbacks):
+            callback_fn()
 
     async def _validate_candidate(
         self,

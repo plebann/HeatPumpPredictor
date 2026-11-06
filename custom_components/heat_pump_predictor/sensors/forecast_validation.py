@@ -34,17 +34,20 @@ class ForecastTemperatureValidationSensor(HeatPumpBaseEntity, SensorEntity):
         self._weather_entity = weather_entity
         self._attr_suggested_object_id = f"{DOMAIN}_forecast_temperature_validation"
         self._attr_extra_state_attributes: dict[str, Any] = {}
-        self._unsubscribe = coordinator.forecast_validation.async_register_update_callback(
-            self._handle_validation_update
-        )
+        self._unsubscribe = None
 
     async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._unsubscribe = self.coordinator.forecast_validation.async_register_update_callback(
+            self._handle_validation_update
+        )
         self._refresh_attributes(dt_util.utcnow())
 
     async def async_will_remove_from_hass(self) -> None:
         if self._unsubscribe:
             self._unsubscribe()
             self._unsubscribe = None
+        await super().async_will_remove_from_hass()
 
     @callback
     def _handle_validation_update(self) -> None:

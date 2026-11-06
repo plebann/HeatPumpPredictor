@@ -390,3 +390,20 @@ def test_validation_schedule_unsubscribes_on_shutdown() -> None:
 
     unsubscribe.assert_called_once_with()
     assert coordinator._unsub_validation_schedule is None
+
+
+def test_validate_due_notifies_sensor_when_only_metrics_window_changes() -> None:
+    store = Mock()
+    store.async_delay_save = Mock()
+    callback = Mock()
+    with patch(
+        "custom_components.heat_pump_predictor.forecast_validation.Store", return_value=store
+    ):
+        manager = ForecastValidationManager(Mock(), "entry", history_source=AsyncMock())
+        manager.async_register_update_callback(callback)
+
+        import asyncio
+
+        asyncio.run(manager.async_validate_due(START))
+
+    callback.assert_called_once_with()
