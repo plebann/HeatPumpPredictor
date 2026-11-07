@@ -17,6 +17,7 @@ from .const import (
     CONF_RUNNING_SENSOR,
     CONF_TEMPERATURE_SENSOR,
     CONF_WEATHER_ENTITY,
+    CONF_ACCURACY_HALF_LIFE_DAYS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -179,6 +180,9 @@ class HeatPumpPredictorOptionsFlow(config_entries.OptionsFlow):
             CONF_WEATHER_ENTITY: self.config_entry.options.get(
                 CONF_WEATHER_ENTITY, self.config_entry.data.get(CONF_WEATHER_ENTITY)
             ),
+            CONF_ACCURACY_HALF_LIFE_DAYS: self.config_entry.options.get(
+                CONF_ACCURACY_HALF_LIFE_DAYS, 7.0
+            ),
         }
 
         if user_input:
@@ -208,5 +212,9 @@ class HeatPumpPredictorOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_WEATHER_ENTITY, default=defaults[CONF_WEATHER_ENTITY]): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="weather")
                 ),
+                vol.Required(
+                    CONF_ACCURACY_HALF_LIFE_DAYS,
+                    default=defaults[CONF_ACCURACY_HALF_LIFE_DAYS],
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=3650)),
             }
         )

@@ -16,6 +16,7 @@ CONF_ENERGY_SENSOR = "energy_sensor"
 CONF_RUNNING_SENSOR = "running_sensor"
 CONF_TEMPERATURE_SENSOR = "temperature_sensor"
 CONF_WEATHER_ENTITY = "weather_entity"
+CONF_ACCURACY_HALF_LIFE_DAYS = "accuracy_half_life_days"
 
 # Entity translation keys
 TRANSLATION_KEY_ENERGY = "total_energy"

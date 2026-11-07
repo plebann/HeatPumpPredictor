@@ -57,6 +57,18 @@ class HeatPumpDataManager:
         self._last_energy_kwh: float | None = None
         self._last_running_state: bool | None = None
         self._last_update_time: datetime | None = None
+        self._tracking_source: str | None = None
+
+    def set_tracking_source(self, source: str) -> bool:
+        """Set the energy source and reset deltas when the source changes."""
+        changed = self._tracking_source != source
+        if changed:
+            self._last_temperature = None
+            self._last_energy_kwh = None
+            self._last_running_state = None
+            self._last_update_time = None
+            self._tracking_source = source
+        return changed
     
     def get_bucket(self, temperature: float) -> int:
         """Get bucket index for temperature using floor function."""
@@ -182,6 +194,7 @@ class HeatPumpDataManager:
                 for temp, bucket in self.buckets.items()
             },
             "tracking": {
+                "source": self._tracking_source,
                 "last_temperature": self._last_temperature,
                 "last_energy_kwh": self._last_energy_kwh,
                 "last_running_state": self._last_running_state,
@@ -211,6 +224,7 @@ class HeatPumpDataManager:
         # Restore tracking state (critical for correct delta calculations after restart)
         if "tracking" in data:
             tracking = data["tracking"]
+            self._tracking_source = tracking.get("source")
             self._last_temperature = tracking.get("last_temperature")
             self._last_energy_kwh = tracking.get("last_energy_kwh")
             self._last_running_state = tracking.get("last_running_state")

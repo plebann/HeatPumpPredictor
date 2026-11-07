@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.event import async_track_time_change
 
-from ..const import CONF_TEMPERATURE_SENSOR, DOMAIN
+from ..const import DOMAIN
 from ..shared_base import HeatPumpBaseEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -132,7 +132,7 @@ class ScheduledForecastEnergySensor(HeatPumpBaseEntity, RestoreSensor):
 
     def _get_current_temperature(self) -> float | None:
         """Best-effort current temperature for trend adjustment seed."""
-        temp_entity = self.coordinator.config_entry.data.get(CONF_TEMPERATURE_SENSOR)
+        temp_entity = self.coordinator.temperature_entity
         if not temp_entity:
             return None
 

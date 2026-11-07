@@ -31,13 +31,15 @@
           "energy_sensor": "Czujnik energii",
           "running_sensor": "Czujnik pracy",
           "temperature_sensor": "Czujnik temperatury",
-          "weather_entity": "Encja pogody"
+          "weather_entity": "Encja pogody",
+          "accuracy_half_life_days": "Okres połowicznego zaniku dokładności (dni)"
         },
         "data_description": {
           "energy_sensor": "Sumaryczny czujnik energii (kWh, total_increasing).",
           "running_sensor": "Czujnik binarny w stanie on, gdy pompa pracuje.",
           "temperature_sensor": "Zewnętrzny czujnik temperatury w °C (device_class: temperature).",
-          "weather_entity": "Encja pogody z godzinową prognozą do predykcji."
+          "weather_entity": "Encja pogody z godzinową prognozą do predykcji.",
+          "accuracy_half_life_days": "Czas, po którym waga EWMA dokładności zmniejsza się o połowę; od 0,1 do 3650 dni."
         }
       }
     }
@@ -79,6 +81,9 @@
       },
       "forecast_temperature_validation": {
         "name": "Walidacja temperatury prognozy"
+      },
+      "forecast_energy_accuracy": {
+        "name": "Dokładność prognozy energii"
       }
     }
   },

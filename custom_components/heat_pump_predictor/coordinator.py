@@ -22,7 +22,14 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .calculator import HeatPumpCalculator
-from .const import DOMAIN, UPDATE_INTERVAL, CONF_ENERGY_SENSOR, CONF_RUNNING_SENSOR, CONF_TEMPERATURE_SENSOR
+from .const import (
+    CONF_ACCURACY_HALF_LIFE_DAYS,
+    CONF_ENERGY_SENSOR,
+    CONF_RUNNING_SENSOR,
+    CONF_TEMPERATURE_SENSOR,
+    DOMAIN,
+    UPDATE_INTERVAL,
+)
 from .data_manager import HeatPumpDataManager
 from .forecast_energy import ForecastEnergyCalculationError, ForecastEnergyCalculator
 from .forecast_validation import ForecastValidationManager
@@ -64,16 +71,20 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.data_manager = HeatPumpDataManager()
         self.calculator = HeatPumpCalculator(self.data_manager)
         self.forecast_energy_calculator = ForecastEnergyCalculator(self.calculator)
-        self._energy_entity = entry.data[CONF_ENERGY_SENSOR]
-        self._running_entity = entry.data[CONF_RUNNING_SENSOR]
-        self._temperature_entity = entry.data[CONF_TEMPERATURE_SENSOR]
+        self._energy_entity = entry.options.get(CONF_ENERGY_SENSOR, entry.data[CONF_ENERGY_SENSOR])
+        self._running_entity = entry.options.get(CONF_RUNNING_SENSOR, entry.data[CONF_RUNNING_SENSOR])
+        self._temperature_entity = entry.options.get(CONF_TEMPERATURE_SENSOR, entry.data[CONF_TEMPERATURE_SENSOR])
         self._unsub_state_listener: Callable[[], None] | None = None
         self._unsub_stop_listener: Callable[[], None] | None = None
         self._unsub_validation_schedule: Callable[[], None] | None = None
         self._shutdown = False
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}.{entry.entry_id}")
         self.forecast_validation = ForecastValidationManager(
-            hass, entry.entry_id, history_entity=self._temperature_entity
+            hass,
+            entry.entry_id,
+            history_entity=self._temperature_entity,
+            energy_entity=self._energy_entity,
+            energy_half_life_days=entry.options.get(CONF_ACCURACY_HALF_LIFE_DAYS, 7.0),
         )
         self._save_debounce_seconds = 5
         self._forecast: list[dict[str, Any]] | None = None
@@ -116,6 +127,8 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if data := await self._store.async_load():
             self.data_manager.from_dict(data)
             _LOGGER.info("Loaded saved heat pump data from storage")
+        if self.data_manager.set_tracking_source(self._energy_entity):
+            _LOGGER.info("Initialized energy tracking source: %s", self._energy_entity)
         await self.forecast_validation.async_load()
 
         await self.async_config_entry_first_refresh()
@@ -278,6 +291,21 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> dict[str, Any]:
         """Calculate energy consumption for a forecast window using cached forecast data."""
 
+        result = await self.async_calculate_forecast_energy_result(
+            starting_hour=starting_hour,
+            hours_ahead=hours_ahead,
+            current_temperature=current_temperature,
+        )
+        return result.as_response()
+
+    async def async_calculate_forecast_energy_result(
+        self,
+        *,
+        starting_hour: int,
+        hours_ahead: int,
+        current_temperature: float | None,
+    ) -> Any:
+        """Calculate a forecast and retain its raw result for internal validation."""
         if not self._forecast:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -299,12 +327,22 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 translation_placeholders=err.placeholders,
             ) from err
 
-        return result.as_response()
+        return result
 
     @property
     def forecast(self) -> list[dict[str, Any]] | None:
         """Return cached forecast data, if any."""
         return self._forecast
+
+    @property
+    def energy_entity(self) -> str:
+        """Return the configured cumulative energy entity."""
+        return self._energy_entity
+
+    @property
+    def temperature_entity(self) -> str:
+        """Return the configured outdoor temperature entity."""
+        return self._temperature_entity
 
     def _build_coordinator_data(self) -> dict[str, Any]:
         """Compose coordinator data payload for listeners."""
