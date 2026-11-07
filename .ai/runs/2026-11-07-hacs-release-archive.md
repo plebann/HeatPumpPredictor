@@ -27,5 +27,5 @@
 
 ### Phase 1: Release packaging
 
-- [ ] 1.1 Include `hacs.json` in the release ZIP and add an archive-content guard
+- [x] 1.1 Include `hacs.json` in the release ZIP and add an archive-content guard — 859c6df
 - [ ] 1.2 Run validation and review the final workflow diff
