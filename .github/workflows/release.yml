@@ -68,6 +68,9 @@ jobs:
           cd custom_components/${{ env.integration_code }}
           jq --arg v "${{ steps.version.outputs.version }}" '.version = $v' manifest.json > tmp.json && mv tmp.json manifest.json
 
+      - name: Validate HACS metadata
+        run: jq empty hacs.json
+
       - name: Create release archive
         run: |
           cd custom_components/${{ env.integration_code }}
