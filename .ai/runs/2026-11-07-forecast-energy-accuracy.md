@@ -37,4 +37,4 @@ Non-goals: removing Scheduled Forecast sensors, changing forecast calculation, c
 
 - [x] 2.1 Implement chronological EWMA aggregation, buckets, recent average, and thresholds — 208fcf8
 - [x] 2.2 Add half-life configuration and the translated diagnostic sensor — 208fcf8
-- [x] 2.3 Update documentation, run the full validation gate, and complete review fixes — ab3ce98
+- [x] 2.3 Update documentation, run the full validation gate, and complete review fixes — ab3ce98, 3c08146
