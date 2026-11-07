@@ -92,7 +92,7 @@ The public Home Assistant service contract for `calculate_forecast_energy` is un
 The new diagnostic sensor publishes:
 
 - native value: aggregate accuracy percentage, or `unknown` before three eligible evaluations or when the decayed actual sum is zero;
-- attributes: an explicit end-to-end description, period/half-life, integer and effective sample counts, per-bucket accuracy/counts, and the most recent evaluation (`predicted_kwh`, `actual_kwh`, `accuracy`, `horizon`, status/reason).
+- attributes: an explicit end-to-end description, period/half-life, integer and effective sample counts, the arithmetic average accuracy of the latest ten eligible individual evaluations, per-bucket accuracy/counts, and the most recent evaluation (`predicted_kwh`, `actual_kwh`, `accuracy`, `horizon`, status/reason). The latest-ten value excludes skipped evaluations and individual results whose accuracy is undefined because `actual_kwh < 0.2`.
 
 Use stable reasons `no_boundary_reading`, `sensor_unavailable`, `negative_difference`, `recorder_unavailable`, `actual_too_small`, and a reason for incomplete forecast hours. Do not expose a fabricated zero accuracy for skipped or undefined results.
 
@@ -130,6 +130,7 @@ Rollback is additive: remove the new sensor, registration side effect, and energ
 | Where should the half-life option live? | The existing config-entry options flow, with a seven-day default and positive numeric validation. | Reuses the existing configuration seam and avoids a new service or public API. |
 | How should an unavailable Store write affect a service response? | Return the unchanged successful response and log the failed observation write. | Protects the existing public service contract; later retries cannot reconstruct a missing call, so the failure is observable in logs. |
 | How should `actual_too_small` appear in aggregate EWMA? | Include its predicted/actual energy pair in aggregate EWMA; only the individual accuracy display is null. | Matches the explicit no-energy-threshold rule: small windows contribute little because EWMA is energy-weighted, while the fixed individual threshold limits misleading single-window percentages. |
+| What does the brief's “last N evaluations” attribute use for N? | Use the latest 10 eligible individual evaluations, as a fixed implementation constant rather than a new option. | Supplies the required recent-history view without expanding configuration; the value is easy to revise later and is separate from the energy-weighted EWMA. |
 
 No assumption requires human confirmation before review; the brief explicitly fixes the service-only scope, sensor source, formulas, thresholds, retention, and phase split.
 
@@ -155,6 +156,6 @@ Validated phase-1 observations feed time-decayed, energy-weighted EWMA state per
 
 ### Phase 2
 
-6. **Add deterministic EWMA aggregation.** Implement chronological `P`/`A` decay by configurable half-life, the five horizon buckets, integer/effective sample counts, the three-sample and positive-actual gates, inclusion of validated energy pairs even when an individual result is below `0.2 kWh`, and exclusion of skipped results.
+6. **Add deterministic aggregation.** Implement chronological `P`/`A` decay by configurable half-life, the five horizon buckets, integer/effective sample counts, the latest-ten arithmetic average of defined individual accuracies, the three-sample and positive-actual gates, inclusion of validated energy pairs even when an individual result is below `0.2 kWh`, and exclusion of skipped results.
 7. **Add configuration and sensor contracts.** Extend the existing options flow and storage defaults for a positive seven-day half-life, create the translated diagnostic sensor, and expose explainable aggregate/latest-result attributes without changing Scheduled Forecast sensors.
 8. **Document and test observable behavior.** Update README and translations, test sensor unknown/known transitions, restart and option changes, EWMA order and decay, bucket boundaries, and exact end-to-end wording. Run the full repository validation command.
