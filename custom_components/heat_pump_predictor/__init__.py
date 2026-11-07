@@ -170,7 +170,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             current_temperature=current_temperature,
         )
         try:
-            await coordinator.forecast_validation.async_record_energy_forecast(
+            coordinator.forecast_validation.async_record_energy_forecast(
                 dt_util.utcnow(), result
             )
         except Exception:

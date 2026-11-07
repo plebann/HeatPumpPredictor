@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
-import asyncio
 import pytest
 
 from custom_components.heat_pump_predictor.forecast_validation import (
@@ -67,7 +66,7 @@ def test_recording_uses_last_hour_as_exclusive_window_end() -> None:
         ],
     )
 
-    asyncio.run(manager.async_record_energy_forecast(first - timedelta(hours=2), result))
+    manager.async_record_energy_forecast(first - timedelta(hours=2), result)
 
     observation = next(iter(manager.data["energy_observations"].values()))
     assert observation["window_start"] == first.isoformat()
