@@ -74,6 +74,32 @@ def test_recording_uses_last_hour_as_exclusive_window_end() -> None:
     assert observation["predicted_kwh"] == 1.23456
 
 
+def test_recording_skips_nonconsecutive_forecast_hours() -> None:
+    store = Mock()
+    store.async_delay_save = Mock()
+    with patch(
+        "custom_components.heat_pump_predictor.forecast_validation.Store",
+        return_value=store,
+    ):
+        manager = ForecastValidationManager(
+            Mock(), "entry", energy_entity="sensor.heat_pump_energy"
+        )
+    first = datetime(2026, 1, 1, 10, tzinfo=UTC)
+    result = SimpleNamespace(
+        total_energy_kwh=1.0,
+        hours_requested=2,
+        hours=[
+            SimpleNamespace(datetime=first),
+            SimpleNamespace(datetime=first + timedelta(hours=2)),
+        ],
+    )
+
+    manager.async_record_energy_forecast(first - timedelta(hours=2), result)
+
+    observation_key = next(iter(manager.data["energy_observations"]))
+    assert manager.data["energy_results"][observation_key]["reason"] == "incomplete_forecast"
+
+
 def test_energy_accuracy_requires_three_samples_and_exposes_recent_average() -> None:
     store = Mock()
     with patch(

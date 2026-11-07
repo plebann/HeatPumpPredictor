@@ -120,6 +120,17 @@ def energy_horizon_bucket(horizon: timedelta | float) -> str | None:
     return "over_24h"
 
 
+def _energy_hours_complete(result: Any, timestamps: list[datetime]) -> bool:
+    """Return whether the result contains the requested consecutive UTC hours."""
+    requested = getattr(result, "hours_requested", len(timestamps))
+    if not isinstance(requested, int) or requested != len(timestamps) or not timestamps:
+        return False
+    return all(
+        current == timestamps[0] + timedelta(hours=index)
+        for index, current in enumerate(timestamps)
+    )
+
+
 def _numeric_state_at_or_before(
     states: list[Any], boundary: datetime
 ) -> tuple[float | None, str | None]:
@@ -624,7 +635,12 @@ class ForecastValidationManager:
         existing_called_at = parse_datetime(existing.get("called_at")) if isinstance(existing, dict) else None
         if not isinstance(existing, dict) or existing_called_at is None or existing_called_at > called_at:
             observations[key] = candidate
-            self._data.setdefault("energy_results", {}).pop(key, None)
+            if _energy_hours_complete(result, timestamps):
+                self._data.setdefault("energy_results", {}).pop(key, None)
+            else:
+                self._data.setdefault("energy_results", {})[key] = self._energy_result(
+                    candidate, "incomplete_forecast", called_at
+                )
         self._store.async_delay_save(lambda: self._data, 5)
 
     async def _async_validate_energy_due(self, now: datetime) -> None:
@@ -634,7 +650,7 @@ class ForecastValidationManager:
         observations = self._data.setdefault("energy_observations", {})
         results = self._data.setdefault("energy_results", {})
         cache: dict[tuple[str, datetime, datetime], list[Any] | Exception] = {}
-        for key, observation in observations.items():
+        for key, observation in tuple(observations.items()):
             if self._energy_observation_due(observation, results.get(key), now):
                 results[key] = await self._validate_energy_observation(
                     observation, cache, now
@@ -650,6 +666,12 @@ class ForecastValidationManager:
         start = parse_datetime(observation.get("window_start"))
         end = parse_datetime(observation.get("window_end"))
         if start is None or end is None or end + VALIDATION_DELAY > now:
+            return False
+        if (
+            isinstance(existing, dict)
+            and existing.get("reason") == "recorder_unavailable"
+            and now > end + RECORDER_RETRY_WINDOW
+        ):
             return False
         return not isinstance(existing, dict) or existing.get("reason") == "recorder_unavailable"
 
@@ -668,7 +690,9 @@ class ForecastValidationManager:
         cache_key = (entity, start, end)
         if cache_key not in cache:
             try:
-                cache[cache_key] = await self._get_history(entity, start, end)
+                cache[cache_key] = await self._get_history(
+                    entity, start, end + timedelta(seconds=1)
+                )
             except Exception as err:
                 cache[cache_key] = err
         history = cache[cache_key]
@@ -697,7 +721,8 @@ class ForecastValidationManager:
     def energy_accuracy(self, now: datetime) -> dict[str, Any]:
         """Return source-specific EWMA and recent accuracy diagnostics."""
         now = as_utc(now)
-        validated = self._validated_energy_results()
+        source_results = self._source_energy_results()
+        validated = [result for result in source_results if self._is_validated_energy_result(result)]
         validated.sort(key=lambda result: result.get("window_end", ""))
         overall_p = overall_a = 0.0
         bucket_state = {
@@ -713,16 +738,22 @@ class ForecastValidationManager:
             end, actual, predicted, decay = sample
             overall_p = overall_p * decay + predicted
             overall_a = overall_a * decay + actual
+            self._decay_bucket_states(bucket_state, decay)
             bucket = result.get("horizon_bucket")
             if bucket in bucket_state:
                 state = bucket_state[bucket]
-                state["predicted_kwh"] = state["predicted_kwh"] * decay + predicted
-                state["actual_kwh"] = state["actual_kwh"] * decay + actual
+                state["predicted_kwh"] += predicted
+                state["actual_kwh"] += actual
                 state["samples"] += 1
-                state["effective_samples"] = state["effective_samples"] * decay + 1
+                state["effective_samples"] += 1
             if result.get("accuracy_percent") is not None:
                 recent.append(float(result["accuracy_percent"]))
             previous_end = end
+        if previous_end is not None:
+            self._decay_bucket_states(
+                bucket_state,
+                self._decay_factor(now - previous_end),
+            )
         recent = recent[-ENERGY_RECENT_LIMIT:]
         return {
             "accuracy": overall_p / overall_a * 100 if len(validated) >= ENERGY_MIN_SAMPLES and overall_a > 0 else None,
@@ -739,17 +770,38 @@ class ForecastValidationManager:
                 }
                 for bucket, state in bucket_state.items()
             },
-            "latest": validated[-1] if validated else None,
+            "latest": max(
+                source_results,
+                key=lambda result: result.get("validated_at", result.get("window_end", "")),
+                default=None,
+            ),
         }
 
-    def _validated_energy_results(self) -> list[dict[str, Any]]:
+    def _source_energy_results(self) -> list[dict[str, Any]]:
         """Return validated results for the currently configured energy source."""
         return [
             result
             for result in self._data.get("energy_results", {}).values()
-            if self._is_validated_energy_result(result)
-            and result.get("energy_entity") == self._energy_entity
+            if isinstance(result, dict) and result.get("energy_entity") == self._energy_entity
         ]
+
+    def _decay_factor(self, elapsed: timedelta) -> float:
+        """Return the EWMA decay factor for an elapsed interval."""
+        return math.exp(
+            -math.log(2)
+            * max(elapsed.total_seconds(), 0)
+            / (self._energy_half_life_days * 86400)
+        )
+
+    @staticmethod
+    def _decay_bucket_states(
+        bucket_state: dict[str, dict[str, float | int]], decay: float
+    ) -> None:
+        """Decay every bucket's weighted sums at each chronological step."""
+        for state in bucket_state.values():
+            state["predicted_kwh"] *= decay
+            state["actual_kwh"] *= decay
+            state["effective_samples"] *= decay
 
     @staticmethod
     def _is_validated_energy_result(result: Any) -> bool:
@@ -770,7 +822,7 @@ class ForecastValidationManager:
         if end is None or actual < 0 or not math.isfinite(predicted):
             return None
         elapsed = 0 if previous_end is None else max((end - previous_end).total_seconds(), 0)
-        decay = math.exp(-math.log(2) * elapsed / (self._energy_half_life_days * 86400))
+        decay = self._decay_factor(timedelta(seconds=elapsed))
         return end, actual, predicted, decay
 
     async def _validate_candidate(

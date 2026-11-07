@@ -8,8 +8,7 @@
           "energy_sensor": "Czujnik energii",
           "running_sensor": "Czujnik pracy",
           "temperature_sensor": "Czujnik temperatury",
-          "weather_entity": "Encja pogody",
-          "accuracy_half_life_days": "Okres połowicznego zaniku dokładności (dni)"
+          "weather_entity": "Encja pogody"
         }
       }
     },
@@ -32,7 +31,8 @@
           "energy_sensor": "Czujnik energii",
           "running_sensor": "Czujnik pracy",
           "temperature_sensor": "Czujnik temperatury",
-          "weather_entity": "Encja pogody"
+          "weather_entity": "Encja pogody",
+          "accuracy_half_life_days": "Okres połowicznego zaniku dokładności (dni)"
         },
         "data_description": {
           "energy_sensor": "Sumaryczny czujnik energii (kWh, total_increasing).",

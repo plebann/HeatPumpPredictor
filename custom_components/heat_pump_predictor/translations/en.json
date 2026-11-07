@@ -8,8 +8,7 @@
           "energy_sensor": "Energy Sensor",
           "running_sensor": "Running Sensor",
           "temperature_sensor": "Temperature Sensor",
-          "weather_entity": "Weather Entity",
-          "accuracy_half_life_days": "Accuracy half-life (days)"
+          "weather_entity": "Weather Entity"
         }
       }
     },
@@ -32,7 +31,8 @@
           "energy_sensor": "Energy Sensor",
           "running_sensor": "Running Sensor",
           "temperature_sensor": "Temperature Sensor",
-          "weather_entity": "Weather Entity"
+          "weather_entity": "Weather Entity",
+          "accuracy_half_life_days": "Accuracy half-life (days)"
         },
         "data_description": {
           "energy_sensor": "Cumulative energy sensor (kWh, total_increasing).",

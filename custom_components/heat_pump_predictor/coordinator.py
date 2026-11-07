@@ -127,6 +127,8 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if data := await self._store.async_load():
             self.data_manager.from_dict(data)
             _LOGGER.info("Loaded saved heat pump data from storage")
+        if self.data_manager.set_tracking_source(self._energy_entity):
+            _LOGGER.info("Initialized energy tracking source: %s", self._energy_entity)
         await self.forecast_validation.async_load()
 
         await self.async_config_entry_first_refresh()
