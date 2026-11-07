@@ -27,14 +27,14 @@ Non-goals: removing Scheduled Forecast sensors, changing forecast calculation, c
 
 ### Phase 1: Persist and verify energy forecast windows
 
-- [ ] 1.1 Characterize the existing service contract and add the internal raw-result seam
-- [ ] 1.2 Add source-bound energy observation persistence, deduplication, migration, and pruning
-- [ ] 1.3 Register successful public service calls without recording direct coordinator consumers
-- [ ] 1.4 Implement Recorder boundary validation, retry, reset detection, and restart handling
-- [ ] 1.5 Add phase-1 regression and integration-style tests
+- [x] 1.1 Characterize the existing service contract and add the internal raw-result seam — 208fcf8
+- [x] 1.2 Add source-bound energy observation persistence, deduplication, migration, and pruning — 208fcf8
+- [x] 1.3 Register successful public service calls without recording direct coordinator consumers — 208fcf8
+- [x] 1.4 Implement Recorder boundary validation, retry, reset detection, and restart handling — 208fcf8
+- [x] 1.5 Add phase-1 regression and integration-style tests — 208fcf8
 
 ### Phase 2: Aggregate and expose accuracy
 
-- [ ] 2.1 Implement chronological EWMA aggregation, buckets, recent average, and thresholds
-- [ ] 2.2 Add half-life configuration and the translated diagnostic sensor
+- [x] 2.1 Implement chronological EWMA aggregation, buckets, recent average, and thresholds — 208fcf8
+- [x] 2.2 Add half-life configuration and the translated diagnostic sensor — 208fcf8
 - [ ] 2.3 Update documentation, run the full validation gate, and complete review fixes
