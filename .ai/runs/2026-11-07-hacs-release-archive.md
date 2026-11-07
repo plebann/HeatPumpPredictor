@@ -23,6 +23,8 @@
 
 ## Progress
 
+PR: #9 (https://github.com/plebann/HeatPumpPredictor/pull/9)
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: Release packaging
