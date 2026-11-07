@@ -72,6 +72,18 @@ jobs:
         run: |
           cd custom_components/${{ env.integration_code }}
           zip -r ../../${{ env.integration_code }}.zip . -x "__pycache__/*" "**/__pycache__/*"
+          cd ../..
+          zip -q ${{ env.integration_code }}.zip hacs.json
+
+          ARCHIVE_CONTENTS=$(unzip -Z1 ${{ env.integration_code }}.zip)
+          grep -Fxq "hacs.json" <<< "$ARCHIVE_CONTENTS" || {
+            echo "Release archive is missing hacs.json"
+            exit 1
+          }
+          grep -Fxq "manifest.json" <<< "$ARCHIVE_CONTENTS" || {
+            echo "Release archive is missing manifest.json"
+            exit 1
+          }
 
       - name: Configure git identity
         run: |
