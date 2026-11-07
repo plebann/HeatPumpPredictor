@@ -153,8 +153,14 @@ def energy_window_actual(
     if end <= start:
         return None, "no_boundary_reading"
     ordered = _timestamped_states(states)
-    previous_numeric: float | None = None
+    start_value, reason = _numeric_state_at_or_before(states, start)
+    if reason:
+        return None, reason
+    assert start_value is not None
+    previous_numeric: float | None = start_value
     for timestamp, state in ordered:
+        if timestamp <= start:
+            continue
         if timestamp > end:
             break
         raw_value = _state_value(state)
@@ -169,9 +175,6 @@ def energy_window_actual(
         if previous_numeric is not None and value < previous_numeric:
             return None, "negative_difference"
         previous_numeric = value
-    start_value, reason = _numeric_state_at_or_before(states, start)
-    if reason:
-        return None, reason
     end_value, reason = _numeric_state_at_or_before(states, end)
     if reason:
         return None, reason
