@@ -9,6 +9,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.util import dt as dt_util
 from .const import (
     ATTR_CONFIG_ENTRY_ID,
     ATTR_TEMPERATURE,
@@ -151,7 +152,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
         coordinator = _get_coordinator_for_service(hass, config_entry_id)
 
-        current_temp_entity = coordinator.config_entry.data.get(CONF_TEMPERATURE_SENSOR)
+        current_temp_entity = coordinator.config_entry.options.get(
+            CONF_TEMPERATURE_SENSOR,
+            coordinator.config_entry.data.get(CONF_TEMPERATURE_SENSOR),
+        )
         current_temp_state = hass.states.get(current_temp_entity) if current_temp_entity else None
         current_temperature: float | None = None
         if current_temp_state:
@@ -160,11 +164,18 @@ def async_setup_services(hass: HomeAssistant) -> None:
             except (TypeError, ValueError):
                 current_temperature = None
 
-        return await coordinator.async_calculate_forecast_energy(
+        result = await coordinator.async_calculate_forecast_energy_result(
             starting_hour=starting_hour,
             hours_ahead=hours_ahead,
             current_temperature=current_temperature,
         )
+        try:
+            await coordinator.forecast_validation.async_record_energy_forecast(
+                dt_util.utcnow(), result
+            )
+        except Exception:
+            _LOGGER.exception("Failed to record energy forecast validation observation")
+        return result.as_response()
     
     hass.services.async_register(
         DOMAIN,

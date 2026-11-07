@@ -13,6 +13,7 @@ from .coordinator import HeatPumpCoordinator
 from .sensors import (
     HeatPumpForecastSensor,
     ForecastTemperatureValidationSensor,
+    ForecastEnergyAccuracySensor,
     HeatPumpPerformanceCurveSensor,
     HeatPumpSensorBase,
     ScheduledForecastEnergySensor,
@@ -68,6 +69,7 @@ async def async_setup_entry(
     if weather_entity:
         entities.append(HeatPumpForecastSensor(hass, coordinator, weather_entity))
         entities.append(ForecastTemperatureValidationSensor(hass, coordinator, weather_entity))
+        entities.append(ForecastEnergyAccuracySensor(hass, coordinator))
 
     entities.extend(
         _build_scheduled_forecast_entities(hass, coordinator)

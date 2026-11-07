@@ -21,12 +21,18 @@ class RecorderHistoryUnavailable(RuntimeError):
 STORAGE_VERSION = 1
 STORAGE_KEY = "heat_pump_predictor.forecast_validation"
 RETENTION = timedelta(days=28)
+ENERGY_RETENTION = timedelta(days=30)
 MAX_HORIZON = timedelta(hours=48)
 
 HORIZON_RANGES = ("0_3h", "3_6h", "6_12h", "12_24h", "24_48h")
 VALIDATION_DELAY = timedelta(minutes=10)
 RECORDER_RETRY_WINDOW = timedelta(hours=24)
 METRICS_WINDOW = timedelta(days=14)
+ENERGY_HALF_LIFE_DAYS = 7.0
+ENERGY_MIN_SAMPLES = 3
+ENERGY_MIN_ACTUAL_KWH = 0.2
+ENERGY_RECENT_LIMIT = 10
+ENERGY_HORIZON_BUCKETS = ("0_3h", "4_6h", "7_12h", "13_24h", "over_24h")
 
 
 def as_utc(value: datetime) -> datetime:
@@ -95,6 +101,85 @@ def horizon_range(horizon: timedelta | float) -> str | None:
     if hours < 24:
         return "12_24h"
     return "24_48h"
+
+
+def energy_horizon_bucket(horizon: timedelta | float) -> str | None:
+    """Return the energy horizon bucket after rounding up to whole hours."""
+    hours = horizon.total_seconds() / 3600 if isinstance(horizon, timedelta) else float(horizon)
+    rounded = math.ceil(hours)
+    if rounded <= 0:
+        return None
+    if rounded <= 3:
+        return "0_3h"
+    if rounded <= 6:
+        return "4_6h"
+    if rounded <= 12:
+        return "7_12h"
+    if rounded <= 24:
+        return "13_24h"
+    return "over_24h"
+
+
+def _numeric_state_at_or_before(
+    states: list[Any], boundary: datetime
+) -> tuple[float | None, str | None]:
+    """Return the latest numeric state at or before a boundary and its failure reason."""
+    candidates = [
+        (timestamp, state)
+        for timestamp, state in _timestamped_states(states)
+        if timestamp <= boundary
+    ]
+    if not candidates:
+        return None, "no_boundary_reading"
+    state = candidates[-1][1]
+    raw_value = _state_value(state)
+    if raw_value in ("unknown", "unavailable", None):
+        return None, "sensor_unavailable"
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return None, "no_boundary_reading"
+    if not math.isfinite(value):
+        return None, "no_boundary_reading"
+    return value, None
+
+
+def energy_window_actual(
+    states: list[Any], start: datetime, end: datetime
+) -> tuple[float | None, str | None]:
+    """Calculate cumulative energy in a window and detect counter resets."""
+    start = as_utc(start)
+    end = as_utc(end)
+    if end <= start:
+        return None, "no_boundary_reading"
+    ordered = _timestamped_states(states)
+    previous_numeric: float | None = None
+    for timestamp, state in ordered:
+        if timestamp > end:
+            break
+        raw_value = _state_value(state)
+        if raw_value in ("unknown", "unavailable", None):
+            continue
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(value):
+            continue
+        if previous_numeric is not None and value < previous_numeric:
+            return None, "negative_difference"
+        previous_numeric = value
+    start_value, reason = _numeric_state_at_or_before(states, start)
+    if reason:
+        return None, reason
+    end_value, reason = _numeric_state_at_or_before(states, end)
+    if reason:
+        return None, reason
+    assert start_value is not None and end_value is not None
+    difference = end_value - start_value
+    if difference < 0:
+        return None, "negative_difference"
+    return difference, None
 
 
 def _state_timestamp(state: Any) -> datetime | None:
@@ -365,11 +450,15 @@ class ForecastValidationManager:
         entry_id: str,
         history_source: Callable[[str, datetime, datetime], Any] | None = None,
         history_entity: str | None = None,
+        energy_entity: str | None = None,
+        energy_half_life_days: float = ENERGY_HALF_LIFE_DAYS,
     ) -> None:
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}.{entry_id}")
         self._data: dict[str, Any] = {"snapshots": {}, "results": {}}
         self._history_source = history_source or self._async_recorder_history
         self._history_entity = history_entity
+        self._energy_entity = energy_entity
+        self._energy_half_life_days = max(float(energy_half_life_days), 0.1)
         self._callbacks: list[Callable[[], None]] = []
 
     @property
@@ -391,6 +480,12 @@ class ForecastValidationManager:
                     "snapshots": snapshots,
                     "results": loaded.get("results", {})
                     if isinstance(loaded.get("results", {}), dict)
+                    else {},
+                    "energy_observations": loaded.get("energy_observations", {})
+                    if isinstance(loaded.get("energy_observations", {}), dict)
+                    else {},
+                    "energy_results": loaded.get("energy_results", {})
+                    if isinstance(loaded.get("energy_results", {}), dict)
                     else {},
                 }
             elif loaded is not None:
@@ -465,11 +560,171 @@ class ForecastValidationManager:
                 candidate, result_key, history_cache, history_entity, now
             )
             results[result_key] = result
+        await self._async_validate_energy_due(now)
         self._store.async_delay_save(lambda: self._data, 5)
         # Notify every scheduled tick so rolling 14-day aggregates expire old
         # samples even when no new validation result was written.
         for callback_fn in tuple(self._callbacks):
             callback_fn()
+
+    async def async_record_energy_forecast(
+        self, called_at: datetime, result: Any
+    ) -> None:
+        """Persist a successful public energy forecast for later validation."""
+        if not self._energy_entity:
+            return
+        hours = getattr(result, "hours", None)
+        predicted = getattr(result, "total_energy_kwh", None)
+        if not isinstance(hours, list) or not hours or predicted is None:
+            return
+        try:
+            predicted = float(predicted)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(predicted) or predicted < 0:
+            return
+        timestamps = [as_utc(hour.datetime) for hour in hours]
+        window_start = timestamps[0]
+        window_end = timestamps[-1] + timedelta(hours=1)
+        called_at = as_utc(called_at)
+        horizon = window_end - called_at
+        bucket = energy_horizon_bucket(horizon)
+        if bucket is None:
+            return
+        key = "|".join((self._energy_entity, window_start.isoformat(), window_end.isoformat()))
+        observations = self._data.setdefault("energy_observations", {})
+        candidate = {
+            "energy_entity": self._energy_entity,
+            "called_at": called_at.isoformat(),
+            "window_start": window_start.isoformat(),
+            "window_end": window_end.isoformat(),
+            "selected_hours": [value.isoformat() for value in timestamps],
+            "hours_requested": len(timestamps),
+            "hours_returned": len(timestamps),
+            "predicted_kwh": predicted,
+            "horizon_hours": math.ceil(horizon.total_seconds() / 3600),
+            "horizon_bucket": bucket,
+            "status": "pending",
+        }
+        existing = observations.get(key)
+        existing_called_at = parse_datetime(existing.get("called_at")) if isinstance(existing, dict) else None
+        if not isinstance(existing, dict) or existing_called_at is None or existing_called_at > called_at:
+            observations[key] = candidate
+            self._data.setdefault("energy_results", {}).pop(key, None)
+        self._store.async_delay_save(lambda: self._data, 5)
+
+    async def _async_validate_energy_due(self, now: datetime) -> None:
+        """Validate matured energy observations against cumulative Recorder history."""
+        if not self._energy_entity:
+            return
+        observations = self._data.setdefault("energy_observations", {})
+        results = self._data.setdefault("energy_results", {})
+        cache: dict[tuple[str, datetime, datetime], list[Any] | Exception] = {}
+        for key, observation in observations.items():
+            if not isinstance(observation, dict):
+                continue
+            start = parse_datetime(observation.get("window_start"))
+            end = parse_datetime(observation.get("window_end"))
+            if start is None or end is None or end + VALIDATION_DELAY > now:
+                continue
+            existing = results.get(key)
+            if isinstance(existing, dict) and existing.get("reason") != "recorder_unavailable":
+                continue
+            entity = observation.get("energy_entity")
+            if not isinstance(entity, str):
+                continue
+            cache_key = (entity, start, end)
+            if cache_key not in cache:
+                try:
+                    cache[cache_key] = await self._get_history(entity, start, end)
+                except Exception as err:
+                    cache[cache_key] = err
+            history = cache[cache_key]
+            if isinstance(history, Exception):
+                results[key] = self._energy_result(observation, "recorder_unavailable", now)
+                continue
+            actual, reason = energy_window_actual(history, start, end)
+            if reason:
+                results[key] = self._energy_result(observation, reason, now)
+                continue
+            assert actual is not None
+            results[key] = self._energy_result(observation, None, now, actual)
+
+    @staticmethod
+    def _energy_result(
+        observation: dict[str, Any], reason: str | None, now: datetime, actual: float | None = None
+    ) -> dict[str, Any]:
+        """Build a persisted energy validation result."""
+        accuracy = None
+        if actual is not None and actual >= ENERGY_MIN_ACTUAL_KWH and actual > 0:
+            accuracy = float(observation["predicted_kwh"]) / actual * 100
+        return {
+            **observation,
+            "status": "validated" if reason is None else "skipped",
+            "actual_kwh": actual,
+            "accuracy_percent": accuracy,
+            "reason": reason or ("actual_too_small" if actual is not None and actual < ENERGY_MIN_ACTUAL_KWH else None),
+            "validated_at": now.isoformat(),
+        }
+
+    def energy_accuracy(self, now: datetime) -> dict[str, Any]:
+        """Return source-specific EWMA and recent accuracy diagnostics."""
+        now = as_utc(now)
+        validated = [
+            result for result in self._data.get("energy_results", {}).values()
+            if isinstance(result, dict)
+            and result.get("status") == "validated"
+            and result.get("energy_entity") == self._energy_entity
+            and isinstance(result.get("actual_kwh"), (int, float))
+        ]
+        validated.sort(key=lambda result: result.get("window_end", ""))
+        overall_p = overall_a = 0.0
+        bucket_state = {
+            bucket: {"predicted_kwh": 0.0, "actual_kwh": 0.0, "samples": 0, "effective_samples": 0.0}
+            for bucket in ENERGY_HORIZON_BUCKETS
+        }
+        previous_end: datetime | None = None
+        recent: list[float] = []
+        for result in validated:
+            end = parse_datetime(result.get("window_end"))
+            actual = float(result["actual_kwh"])
+            predicted = float(result.get("predicted_kwh", 0))
+            if end is None or actual < 0 or not math.isfinite(predicted):
+                continue
+            if previous_end is None:
+                decay = 1.0
+            else:
+                decay = math.exp(-math.log(2) * max((end - previous_end).total_seconds(), 0) / (self._energy_half_life_days * 86400))
+            overall_p = overall_p * decay + predicted
+            overall_a = overall_a * decay + actual
+            bucket = result.get("horizon_bucket")
+            if bucket in bucket_state:
+                state = bucket_state[bucket]
+                state["predicted_kwh"] = state["predicted_kwh"] * decay + predicted
+                state["actual_kwh"] = state["actual_kwh"] * decay + actual
+                state["samples"] += 1
+                state["effective_samples"] = state["effective_samples"] * decay + 1
+            if result.get("accuracy_percent") is not None:
+                recent.append(float(result["accuracy_percent"]))
+            previous_end = end
+        recent = recent[-ENERGY_RECENT_LIMIT:]
+        return {
+            "accuracy": overall_p / overall_a * 100 if len(validated) >= ENERGY_MIN_SAMPLES and overall_a > 0 else None,
+            "samples": len(validated),
+            "effective_samples": sum(state["effective_samples"] for state in bucket_state.values()),
+            "recent_accuracy": sum(recent) / len(recent) if recent else None,
+            "half_life_days": self._energy_half_life_days,
+            "buckets": {
+                bucket: {
+                    **state,
+                    "accuracy": state["predicted_kwh"] / state["actual_kwh"] * 100
+                    if state["samples"] >= ENERGY_MIN_SAMPLES and state["actual_kwh"] > 0
+                    else None,
+                }
+                for bucket, state in bucket_state.items()
+            },
+            "latest": validated[-1] if validated else None,
+        }
 
     async def _validate_candidate(
         self,
@@ -638,6 +893,18 @@ class ForecastValidationManager:
         cutoff = now - RETENTION
         self._prune_snapshots(cutoff)
         self._prune_results(cutoff)
+        energy_cutoff = now - ENERGY_RETENTION
+        for collection_name in ("energy_observations", "energy_results"):
+            collection = self._data.setdefault(collection_name, {})
+            for key, record in list(collection.items()):
+                if not isinstance(record, dict):
+                    del collection[key]
+                    continue
+                timestamp = parse_datetime(
+                    record.get("validated_at") or record.get("called_at")
+                )
+                if timestamp is not None and timestamp < energy_cutoff:
+                    del collection[key]
 
     def _prune_snapshots(self, cutoff: datetime) -> None:
         """Remove malformed and expired snapshot records."""

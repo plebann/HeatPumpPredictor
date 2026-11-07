@@ -11,6 +11,7 @@ from .performance import HeatPumpPerformanceCurveSensor
 from .forecast_cache import HeatPumpForecastSensor
 from .scheduled_forecast import ScheduledForecastEnergySensor
 from .forecast_validation import ForecastTemperatureValidationSensor
+from .forecast_energy_accuracy import ForecastEnergyAccuracySensor
 
 __all__ = [
     "HeatPumpSensorBase",
@@ -24,4 +25,5 @@ __all__ = [
     "HeatPumpForecastSensor",
     "ScheduledForecastEnergySensor",
     "ForecastTemperatureValidationSensor",
+    "ForecastEnergyAccuracySensor",
 ]
