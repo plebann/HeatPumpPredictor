@@ -167,6 +167,11 @@ def _numeric_state_value(state: Any) -> float | None:
     return value if math.isfinite(value) else None
 
 
+def _actual_is_large_enough(actual: float) -> bool:
+    """Compare meter values with tolerance for binary floating-point noise."""
+    return actual >= ENERGY_MIN_ACTUAL_KWH - 1e-9
+
+
 def _has_counter_reset(
     ordered: list[tuple[datetime, Any]], start: datetime, end: datetime, initial: float
 ) -> bool:
@@ -707,20 +712,25 @@ class ForecastValidationManager:
     ) -> dict[str, Any]:
         """Build a persisted energy validation result."""
         accuracy = None
-        if actual is not None and actual >= ENERGY_MIN_ACTUAL_KWH and actual > 0:
+        if actual is not None and _actual_is_large_enough(actual) and actual > 0:
             accuracy = float(observation["predicted_kwh"]) / actual * 100
         return {
             **observation,
             "status": "validated" if reason is None else "skipped",
             "actual_kwh": actual,
             "accuracy_percent": accuracy,
-            "reason": reason or ("actual_too_small" if actual is not None and actual < ENERGY_MIN_ACTUAL_KWH else None),
+            "reason": reason or (
+                "actual_too_small"
+                if actual is not None and not _actual_is_large_enough(actual)
+                else None
+            ),
             "validated_at": now.isoformat(),
         }
 
     def energy_accuracy(self, now: datetime) -> dict[str, Any]:
         """Return source-specific EWMA and recent accuracy diagnostics."""
         now = as_utc(now)
+        self._prune(now)
         source_results = self._source_energy_results()
         validated = [result for result in source_results if self._is_validated_energy_result(result)]
         validated.sort(key=lambda result: result.get("window_end", ""))
@@ -806,10 +816,20 @@ class ForecastValidationManager:
     @staticmethod
     def _is_validated_energy_result(result: Any) -> bool:
         """Return whether a stored result can contribute to accuracy."""
-        return bool(
-            isinstance(result, dict)
-            and result.get("status") == "validated"
-            and isinstance(result.get("actual_kwh"), (int, float))
+        if not isinstance(result, dict) or result.get("status") != "validated":
+            return False
+        if parse_datetime(result.get("window_end")) is None:
+            return False
+        try:
+            actual = float(result.get("actual_kwh"))
+            predicted = float(result.get("predicted_kwh"))
+        except (TypeError, ValueError):
+            return False
+        return (
+            math.isfinite(actual)
+            and math.isfinite(predicted)
+            and actual >= 0
+            and predicted >= 0
         )
 
     def _energy_accuracy_sample(
@@ -817,8 +837,11 @@ class ForecastValidationManager:
     ) -> tuple[datetime, float, float, float] | None:
         """Normalize one result and calculate its decay factor."""
         end = parse_datetime(result.get("window_end"))
-        actual = float(result["actual_kwh"])
-        predicted = float(result.get("predicted_kwh", 0))
+        try:
+            actual = float(result["actual_kwh"])
+            predicted = float(result.get("predicted_kwh", 0))
+        except (TypeError, ValueError):
+            return None
         if end is None or actual < 0 or not math.isfinite(predicted):
             return None
         elapsed = 0 if previous_end is None else max((end - previous_end).total_seconds(), 0)
@@ -994,18 +1017,35 @@ class ForecastValidationManager:
         cutoff = now - RETENTION
         self._prune_snapshots(cutoff)
         self._prune_results(cutoff)
+        self._prune_energy(now)
+
+    def _prune_energy(self, now: datetime) -> None:
+        """Finalize expired pending observations and prune verified energy data."""
+        observations = self._data.setdefault("energy_observations", {})
+        results = self._data.setdefault("energy_results", {})
+        retry_cutoff = now - RECORDER_RETRY_WINDOW
+        for key, observation in observations.copy().items():
+            if not isinstance(observation, dict):
+                del observations[key]
+                continue
+            end = parse_datetime(observation.get("window_end"))
+            if key not in results and end is not None and end < retry_cutoff:
+                results[key] = self._energy_result(observation, "recorder_unavailable", now)
         energy_cutoff = now - ENERGY_RETENTION
-        for collection_name in ("energy_observations", "energy_results"):
-            collection = self._data.setdefault(collection_name, {})
-            for key, record in collection.copy().items():
-                if not isinstance(record, dict):
-                    del collection[key]
-                    continue
-                timestamp = parse_datetime(
-                    record.get("validated_at") or record.get("called_at")
-                )
-                if timestamp is not None and timestamp < energy_cutoff:
-                    del collection[key]
+        for key, record in results.copy().items():
+            if not isinstance(record, dict):
+                del results[key]
+                continue
+            timestamp = parse_datetime(record.get("validated_at"))
+            if timestamp is not None and timestamp < energy_cutoff:
+                del results[key]
+                observations.pop(key, None)
+        for key, observation in observations.copy().items():
+            if key in results:
+                continue
+            called_at = parse_datetime(observation.get("called_at"))
+            if called_at is not None and called_at < energy_cutoff:
+                del observations[key]
 
     def _prune_snapshots(self, cutoff: datetime) -> None:
         """Remove malformed and expired snapshot records."""

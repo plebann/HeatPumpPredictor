@@ -150,6 +150,76 @@ def test_validate_due_retries_recorder_unavailable() -> None:
     assert history_source.await_count == 2
 
 
+def test_validate_due_validates_energy_against_captured_source() -> None:
+    store = Mock()
+    store.async_delay_save = Mock()
+    energy_start = START
+    energy_end = START + timedelta(hours=1)
+    history_source = AsyncMock(
+        return_value={
+            "sensor.old_energy": [
+                state("10.00", energy_start),
+                state("10.50", energy_end),
+            ]
+        }
+    )
+    with patch(
+        "custom_components.heat_pump_predictor.forecast_validation.Store", return_value=store
+    ):
+        manager = ForecastValidationManager(
+            Mock(), "entry", history_source=history_source, energy_entity="sensor.new_energy"
+        )
+        manager.data["energy_observations"] = {
+            "old-window": {
+                "energy_entity": "sensor.old_energy",
+                "called_at": (START - timedelta(hours=2)).isoformat(),
+                "window_start": energy_start.isoformat(),
+                "window_end": energy_end.isoformat(),
+                "predicted_kwh": 0.5,
+                "horizon_bucket": "0_3h",
+            }
+        }
+
+        import asyncio
+
+        asyncio.run(manager.async_validate_due(energy_end + timedelta(minutes=11)))
+
+    assert history_source.await_args.args[0] == "sensor.old_energy"
+    assert manager.data["energy_results"]["old-window"]["actual_kwh"] == pytest.approx(0.5)
+
+
+def test_energy_recorder_retry_succeeds_after_reload_attempt() -> None:
+    store = Mock()
+    store.async_delay_save = Mock()
+    energy_end = START + timedelta(hours=1)
+    history_source = AsyncMock(
+        side_effect=[RuntimeError("recorder unavailable"), {"sensor.energy": [state("1", START), state("2", energy_end)]}]
+    )
+    with patch(
+        "custom_components.heat_pump_predictor.forecast_validation.Store", return_value=store
+    ):
+        manager = ForecastValidationManager(
+            Mock(), "entry", history_source=history_source, energy_entity="sensor.energy"
+        )
+        manager.data["energy_observations"] = {
+            "window": {
+                "energy_entity": "sensor.energy",
+                "called_at": (START - timedelta(hours=2)).isoformat(),
+                "window_start": START.isoformat(),
+                "window_end": energy_end.isoformat(),
+                "predicted_kwh": 1.0,
+                "horizon_bucket": "0_3h",
+            }
+        }
+        import asyncio
+
+        asyncio.run(manager.async_validate_due(energy_end + timedelta(minutes=11)))
+        asyncio.run(manager.async_validate_due(energy_end + timedelta(minutes=12)))
+
+    assert history_source.await_count == 2
+    assert manager.data["energy_results"]["window"]["status"] == "validated"
+
+
 def test_validate_due_reads_configured_temperature_sensor_not_weather_entity() -> None:
     store = Mock()
     store.async_delay_save = Mock()

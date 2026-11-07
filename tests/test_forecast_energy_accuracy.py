@@ -41,6 +41,17 @@ def test_energy_window_returns_cumulative_difference_at_boundaries() -> None:
     assert energy_window_actual(states, start, end) == (0.25, None)
 
 
+def test_exact_two_tenths_kwh_is_not_too_small() -> None:
+    start = datetime(2026, 1, 1, 10, tzinfo=UTC)
+    end = start + timedelta(hours=1)
+    states = [state(start, "10.00"), state(end, "10.20")]
+
+    actual, reason = energy_window_actual(states, start, end)
+
+    assert actual == pytest.approx(0.2)
+    assert reason is None
+
+
 def test_energy_horizon_rounds_up_into_product_buckets() -> None:
     assert energy_horizon_bucket(3.0) == "0_3h"
     assert energy_horizon_bucket(3.01) == "4_6h"
@@ -130,3 +141,58 @@ def test_energy_accuracy_requires_three_samples_and_exposes_recent_average() -> 
     assert diagnostics["accuracy"] == pytest.approx(97.46981099)
     assert diagnostics["samples"] == 3
     assert diagnostics["recent_accuracy"] == (100.0 + 200.0 + 50.0) / 3
+
+
+def test_energy_accuracy_prunes_old_results_after_restart() -> None:
+    store = Mock()
+    with patch(
+        "custom_components.heat_pump_predictor.forecast_validation.Store",
+        return_value=store,
+    ):
+        manager = ForecastValidationManager(
+            Mock(), "entry", energy_entity="sensor.heat_pump_energy"
+        )
+    now = datetime(2026, 2, 15, tzinfo=UTC)
+    manager.data["energy_results"] = {
+        "old": {
+            "status": "validated",
+            "energy_entity": "sensor.heat_pump_energy",
+            "window_end": (now - timedelta(days=31)).isoformat(),
+            "validated_at": (now - timedelta(days=31)).isoformat(),
+            "predicted_kwh": 1.0,
+            "actual_kwh": 1.0,
+            "accuracy_percent": 100.0,
+            "horizon_bucket": "0_3h",
+        }
+    }
+
+    diagnostics = manager.energy_accuracy(now)
+
+    assert diagnostics["samples"] == 0
+    assert manager.data["energy_results"] == {}
+
+
+def test_expired_pending_observation_becomes_terminal_recorder_failure() -> None:
+    store = Mock()
+    with patch(
+        "custom_components.heat_pump_predictor.forecast_validation.Store",
+        return_value=store,
+    ):
+        manager = ForecastValidationManager(
+            Mock(), "entry", energy_entity="sensor.heat_pump_energy"
+        )
+    now = datetime(2026, 2, 15, tzinfo=UTC)
+    manager.data["energy_observations"] = {
+        "pending": {
+            "energy_entity": "sensor.heat_pump_energy",
+            "called_at": (now - timedelta(days=31)).isoformat(),
+            "window_start": (now - timedelta(days=31)).isoformat(),
+            "window_end": (now - timedelta(days=31) + timedelta(hours=1)).isoformat(),
+            "predicted_kwh": 1.0,
+            "horizon_bucket": "0_3h",
+        }
+    }
+
+    manager.energy_accuracy(now)
+
+    assert manager.data["energy_results"]["pending"]["reason"] == "recorder_unavailable"

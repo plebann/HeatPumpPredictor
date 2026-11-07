@@ -339,6 +339,11 @@ class HeatPumpCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Return the configured cumulative energy entity."""
         return self._energy_entity
 
+    @property
+    def temperature_entity(self) -> str:
+        """Return the configured outdoor temperature entity."""
+        return self._temperature_entity
+
     def _build_coordinator_data(self) -> dict[str, Any]:
         """Compose coordinator data payload for listeners."""
         return {
