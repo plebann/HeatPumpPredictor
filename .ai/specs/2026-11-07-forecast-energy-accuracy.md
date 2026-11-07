@@ -1,6 +1,7 @@
 # Evaluate energy forecast accuracy against actual heat pump consumption
 
 Extends: `.ai/specs/briefs/2026-11-06-forecast-temperature-validation.md` — reuses its `ForecastValidationManager` persistence, Recorder access, retry, pruning, and update-callback infrastructure; does not change temperature validation semantics.
+Requirements source: `.ai/specs/briefs/2026-11-07-forecast-energy-accuracy.md` — the energy-specific formulas, thresholds, source scope, retention, and phase split are accepted direction from this brief, not from the temperature-validation brief.
 
 ## 📝 TLDR
 
@@ -14,7 +15,7 @@ The result must describe end-to-end forecast accuracy: weather forecast error, t
 
 ## 📝 Proposed Solution
 
-Extend `ForecastValidationManager` rather than creating a parallel validation module. The service handler records a successful call after the coordinator returns, using the actual first and last `hours[].datetime` values from the result. It stores `called_at`, `window_start`, `window_end`, and `predicted_kwh`; `starting_hour` is not used to derive dates because the calculator may select the next day's matching hour.
+Extend `ForecastValidationManager` rather than creating a parallel validation module. The service handler records a successful call after the coordinator returns, using the actual first and last `hours[].datetime` values from the result. The window is `[first_datetime, last_datetime + 1 elapsed hour)`, calculated in UTC, so the final predicted hour is included. It stores `called_at`, `window_start`, `window_end`, and `predicted_kwh`; `starting_hour` is not used to derive dates because the calculator may select the next day's matching hour.
 
 When a window has matured, the manager reads the configured cumulative energy sensor from Recorder using the same entity selection path as the learning coordinator. It obtains the last known state at or before each boundary (`include_start_time_state`), computes `state(window_end) - state(window_start)`, and keeps a durable validated or skipped result. A short post-window delay allows Recorder to commit the final reading. Existing temperature snapshot/result shapes, metrics, and sensor contract remain unchanged.
 
@@ -33,9 +34,9 @@ Alternatives rejected by the brief are recording direct coordinator calls (which
 
 #### ADDED: Validate a complete energy window
 
-- **WHEN** a stored window has passed `window_end` plus the validation delay
+- **WHEN** a stored window has passed the exclusive `window_end` plus the validation delay
 - **THEN** Recorder is read for the configured cumulative energy sensor, including the state at each boundary, and actual consumption is the end reading minus the start reading.
-- **WHEN** either boundary is unavailable, the sensor is unavailable, the difference is negative, the Recorder remains unavailable after retries, or required forecast hours are missing
+- **WHEN** either boundary is unavailable, the sensor is unavailable, any consecutive numeric Recorder reading decreases, the Recorder remains unavailable after retries, or required forecast hours are missing
 - **THEN** the result is skipped with a stable reason and is not included in accuracy aggregates; a missing forecast-hour window is never partially summed.
 
 #### ADDED: Publish energy accuracy diagnostics
@@ -57,7 +58,7 @@ flowchart LR
   T[Existing temperature validation] --> M
 ```
 
-The service handler in `custom_components/heat_pump_predictor/__init__.py` is the only registration point. `coordinator.async_calculate_forecast_energy` continues to calculate and return the existing `ForecastEnergyResult`; Scheduled Forecast sensors therefore do not register samples. `forecast_energy.py` remains the source of the selected hourly timestamps and total. `coordinator.py` supplies the configured energy entity to the manager and triggers due validation on the existing schedule, including after startup.
+The service handler in `custom_components/heat_pump_predictor/__init__.py` is the only registration point. `coordinator.async_calculate_forecast_energy` continues to calculate and return the existing dictionary response; Scheduled Forecast sensors therefore do not register samples. Add an internal raw-result seam (for example, a coordinator method returning `ForecastEnergyResult`) for the service handler to obtain the unrounded total and selected timestamps before the existing `.as_response()` conversion. This preserves the coordinator's current dictionary API while avoiding validation based on its three-decimal rounded total. `forecast_energy.py` remains the source of the selected hourly timestamps and total. `coordinator.py` supplies the configured energy entity to the manager and triggers due validation on the existing schedule, including after startup.
 
 The manager should separate temperature and energy namespaces in its persisted data or use an explicit schema discriminator so existing temperature results cannot be interpreted as energy results. Storage migration must retain existing temperature data. The existing temperature sensor callback remains unchanged; the Phase 2 energy sensor may register its own callback against the same manager update notification.
 
@@ -68,6 +69,7 @@ Persist an energy observation keyed by a stable window key derived from `(window
 ```text
 EnergyObservation
   called_at: ISO datetime
+  energy_entity: entity id captured at registration
   window_start: ISO datetime
   window_end: ISO datetime
   selected_hours: ordered list of ISO datetimes
@@ -81,7 +83,7 @@ EnergyObservation
   validated_at: ISO datetime | null
 ```
 
-Store the observation and its validation result in the existing per-config-entry `Store`. Persist the ordered selected hourly datetimes (and requested/returned count) so validation can prove that the window was complete rather than inferring completeness from only its boundaries and total. Retain validated and skipped records for 30 days after their verification attempt; pending records remain until they can be validated or the Recorder retry window expires, then become `recorder_unavailable` and enter the same retention policy. The oldest candidate wins deduplication. Use the energy sensor selected in the config entry/options path; do not introduce a second sensor selector in this feature.
+Store the observation and its validation result in the existing per-config-entry `Store`. Persist the ordered selected hourly datetimes (and requested/returned count) so validation can prove that the window was complete rather than inferring completeness from only its boundaries and total. Include `energy_entity` in the observation, result key, deduplication key, and aggregate source identity. A pending observation always validates against the entity captured at registration, even if the config option later changes; the current diagnostic sensor reports only the currently configured entity's source-specific results. Retain validated and skipped records for 30 days after their verification attempt; pending records remain until they can be validated or the Recorder retry window expires, then become `recorder_unavailable` and enter the same retention policy. The oldest candidate wins deduplication within an energy source. Do not introduce a second sensor selector in this feature.
 
 For each horizon bucket, maintain EWMA sums `P`, `A`, and the number of eligible evaluations. On a new evaluation ordered by `window_end`, decay both sums by `exp(-ln(2) × Δt / T½)` and add predicted and actual energy. The aggregate accuracy is `P / A × 100%`; the default half-life is seven days and is configurable through the integration options. Keep enough timestamped aggregate state to apply decay deterministically after restart and when results are evaluated out of order. An effective sample count should expose the decayed contribution separately from the integer count.
 
@@ -104,12 +106,12 @@ The options flow adds a positive duration setting for EWMA half-life, defaulting
 
 ## 📝 Edge Cases & Failure Scenarios
 
-- **Next-day selection:** derive boundaries from returned hourly datetimes, not from `starting_hour`, so a matching hour selected tomorrow is recorded correctly.
+- **Next-day selection:** derive boundaries from returned hourly datetimes, not from `starting_hour`, so a matching hour selected tomorrow is recorded correctly. A one-hour result uses the next hour as its exclusive end; a multi-hour result includes the full final hour.
 - **Incomplete forecast:** reject the candidate for validation rather than summing the available hours.
 - **Recorder boundary:** request `include_start_time_state` and select the last known state no later than each boundary. No age limit is applied because Recorder may persist only changes.
 - **Quantization:** the configured meter's `0.01 kWh` resolution creates at most `0.01 kWh` uncertainty per boundary and `0.02 kWh` per window; actual below `0.2 kWh` has no individual percentage.
-- **Counter reset:** a negative difference is skipped and never contributes to EWMA.
-- **Unavailable sensor:** unavailable/unknown/non-numeric boundary states are skipped with a reason; the manager retries Recorder failures and persists pending work across restart.
+- **Counter reset:** inspect the chronological numeric Recorder states spanning the window, including the start-boundary state; if any consecutive reading decreases, skip the window with `negative_difference` and never contribute it to EWMA, even when the final boundary difference is positive.
+- **Unavailable sensor:** unavailable/unknown/non-numeric boundary states are skipped with a reason; the manager retries Recorder failures and persists pending work across restart. A pending observation continues to use the `energy_entity` captured when the service call was registered, even if the configured entity later changes.
 - **Restart:** on startup, load Store data and validate all matured pending observations on the next scheduled manager pass.
 - **Out-of-order completion:** process accepted evaluations in `window_end` order for EWMA. A duplicate window cannot replace the oldest call.
 - **Small sample:** aggregate remains unknown until three eligible evaluations and positive actual-energy mass; no additional energy threshold is introduced.
@@ -148,11 +150,11 @@ Validated phase-1 observations feed time-decayed, energy-weighted EWMA state per
 
 ### Phase 1
 
-1. **Characterize the existing service contract.** Add/retain tests proving `ForecastEnergyResult.as_response()` and the public service handler return the current fields and values, including next-day window selection and incomplete-window errors.
+1. **Characterize the existing service contract.** Add/retain tests proving `ForecastEnergyResult.as_response()` and the public service handler return the current fields and values, including next-day window selection and incomplete-window errors. Add an internal raw-result seam for registration so the public dictionary response remains unchanged while persisted predictions retain full precision.
 2. **Add energy observation persistence.** Extend `ForecastValidationManager` with a namespaced energy observation/result schema, 30-day pruning, window-key deduplication with oldest-call-wins, finite-value validation, and Store migration/invalid-record isolation that preserves temperature data.
 3. **Register service calls at the boundary.** After a successful handler call, derive boundaries from the returned `hours` datetimes and record the predicted total. Prove direct coordinator calls, including Scheduled Forecast, do not register observations; prove persistence failure does not alter the response contract.
-4. **Implement Recorder boundary validation.** Read the configured cumulative energy sensor with `include_start_time_state`, select states no later than each boundary, compute the difference, classify unavailable/missing/negative/incomplete cases, retry Recorder failures, and process matured records after restart.
-5. **Validate phase 1 end to end.** Add focused tests for quantization boundaries, counter resets, next-day windows, duplicate calls, restart persistence, retry expiry, missing hours, and retention. Run the repository test suite before shipping the phase.
+4. **Implement Recorder boundary validation.** Read the captured cumulative energy sensor with `include_start_time_state`, select states no later than each boundary, inspect consecutive numeric readings for resets, compute the difference, classify unavailable/missing/negative/incomplete cases, retry Recorder failures, and process matured records after restart.
+5. **Validate phase 1 end to end.** Add focused tests for one-hour and multi-hour exclusive boundaries, quantization boundaries, counter resets with a positive final difference, source changes, next-day windows, duplicate calls per source, restart persistence, retry expiry, missing hours, and retention. Run the repository test suite before shipping the phase.
 
 ### Phase 2
 
