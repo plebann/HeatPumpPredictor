@@ -1023,6 +1023,15 @@ class ForecastValidationManager:
         """Finalize expired pending observations and prune verified energy data."""
         observations = self._data.setdefault("energy_observations", {})
         results = self._data.setdefault("energy_results", {})
+        self._finalize_expired_energy(observations, results, now)
+        self._prune_energy_results(observations, results, now)
+        self._prune_orphaned_energy_observations(observations, results, now)
+
+    @staticmethod
+    def _finalize_expired_energy(
+        observations: dict[str, Any], results: dict[str, Any], now: datetime
+    ) -> None:
+        """Turn observations past the Recorder retry window into terminal results."""
         retry_cutoff = now - RECORDER_RETRY_WINDOW
         for key, observation in observations.copy().items():
             if not isinstance(observation, dict):
@@ -1030,7 +1039,15 @@ class ForecastValidationManager:
                 continue
             end = parse_datetime(observation.get("window_end"))
             if key not in results and end is not None and end < retry_cutoff:
-                results[key] = self._energy_result(observation, "recorder_unavailable", now)
+                results[key] = ForecastValidationManager._energy_result(
+                    observation, "recorder_unavailable", now
+                )
+
+    @staticmethod
+    def _prune_energy_results(
+        observations: dict[str, Any], results: dict[str, Any], now: datetime
+    ) -> None:
+        """Remove malformed or expired terminal energy results."""
         energy_cutoff = now - ENERGY_RETENTION
         for key, record in results.copy().items():
             if not isinstance(record, dict):
@@ -1040,8 +1057,15 @@ class ForecastValidationManager:
             if timestamp is not None and timestamp < energy_cutoff:
                 del results[key]
                 observations.pop(key, None)
+
+    @staticmethod
+    def _prune_orphaned_energy_observations(
+        observations: dict[str, Any], results: dict[str, Any], now: datetime
+    ) -> None:
+        """Remove pending observations that have exceeded raw-data retention."""
+        energy_cutoff = now - ENERGY_RETENTION
         for key, observation in observations.copy().items():
-            if key in results:
+            if key in results or not isinstance(observation, dict):
                 continue
             called_at = parse_datetime(observation.get("called_at"))
             if called_at is not None and called_at < energy_cutoff:
