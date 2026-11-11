@@ -24,7 +24,7 @@ calculate_forecast_energy:
   fields:
     starting_hour:
       name: Starting hour
-      description: Local hour (0-23) to begin accumulation within the cached forecast window.
+      description: Complete local hourly bucket (0-23) to begin accumulation; the current bucket remains eligible until it ends.
       required: true
       example: 15
       selector:

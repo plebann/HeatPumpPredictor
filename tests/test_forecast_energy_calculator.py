@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -38,6 +39,163 @@ class FakeHeatPumpCalculator:
     def trend_adjustment(self, delta: float, temperature: float) -> float:
         self.trend_adjustments.append((delta, temperature))
         return 1.1 if delta > 0 else 0.9
+
+
+@pytest.mark.parametrize(
+    "now",
+    [
+        datetime(2026, 1, 1, 6, 0, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, 6, 1, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, 6, 59, 59, tzinfo=timezone.utc),
+    ],
+)
+def test_forecast_energy_selects_current_hour_until_it_ends(now: datetime) -> None:
+    """Treat starting_hour as the complete current hourly bucket."""
+    calculator = FakeHeatPumpCalculator()
+    forecast = [
+        {"datetime": "2026-01-02T06:00:00+00:00", "temperature": 20.0},
+        {"datetime": "2026-01-01T07:00:00+00:00", "temperature": 12.0},
+        {"datetime": "2026-01-01T06:00:00+00:00", "temperature": 11.0},
+    ]
+
+    result = ForecastEnergyCalculator(calculator).calculate(
+        forecast,
+        starting_hour=6,
+        hours_ahead=2,
+        current_temperature=10.0,
+        now=now,
+    )
+
+    response = result.as_response()
+    assert [hour["datetime"] for hour in response["hours"]] == [
+        "2026-01-01T06:00:00+00:00",
+        "2026-01-01T07:00:00+00:00",
+    ]
+    assert response["hours"][0]["temperature_delta"] == 1.0
+    assert calculator.trend_adjustments[0] == (1.0, 11.0)
+
+
+def test_forecast_energy_selects_next_starting_hour_after_current_hour_ends() -> None:
+    """Stop selecting the current bucket at its exclusive end boundary."""
+    calculator = FakeHeatPumpCalculator()
+    forecast = [
+        {"datetime": "2026-01-01T06:00:00+00:00", "temperature": 11.0},
+        {"datetime": "2026-01-02T05:00:00+00:00", "temperature": 19.0},
+        {"datetime": "2026-01-02T06:00:00+00:00", "temperature": 20.0},
+    ]
+
+    result = ForecastEnergyCalculator(calculator).calculate(
+        forecast,
+        starting_hour=6,
+        hours_ahead=1,
+        current_temperature=10.0,
+        now=datetime(2026, 1, 1, 7, 0, tzinfo=timezone.utc),
+    )
+
+    first_hour = result.as_response()["hours"][0]
+    assert first_hour["datetime"] == "2026-01-02T06:00:00+00:00"
+    assert first_hour["temperature_delta"] == 1.0
+
+
+def test_forecast_energy_omits_current_hour_trend_without_current_temperature() -> None:
+    """Calculate the current bucket without a trend seed when the sensor is unavailable."""
+    calculator = FakeHeatPumpCalculator()
+
+    result = ForecastEnergyCalculator(calculator).calculate(
+        [{"datetime": "2026-01-01T06:00:00+00:00", "temperature": 11.0}],
+        starting_hour=6,
+        hours_ahead=1,
+        current_temperature=None,
+        now=datetime(2026, 1, 1, 6, 30, tzinfo=timezone.utc),
+    )
+
+    first_hour = result.as_response()["hours"][0]
+    assert first_hour["temperature_delta"] is None
+    assert first_hour["trend_adjustment"] is None
+    assert calculator.trend_adjustments == []
+
+
+def test_forecast_energy_matches_current_hour_after_timezone_conversion() -> None:
+    """Match forecast instants after converting them into the caller's local timezone."""
+    warsaw = ZoneInfo("Europe/Warsaw")
+
+    result = ForecastEnergyCalculator(FakeHeatPumpCalculator()).calculate(
+        [{"datetime": "2026-01-01T05:00:00+00:00", "temperature": 11.0}],
+        starting_hour=6,
+        hours_ahead=1,
+        current_temperature=10.0,
+        now=datetime(2026, 1, 1, 6, 30, tzinfo=warsaw),
+    )
+
+    assert result.as_response()["hours"][0]["datetime"] == "2026-01-01T06:00:00+01:00"
+
+
+def test_forecast_energy_seeds_current_bucket_at_fractional_utc_offset() -> None:
+    """Recognize a UTC-aligned forecast within a fractional-offset local bucket."""
+    kolkata = ZoneInfo("Asia/Kolkata")
+    calculator = FakeHeatPumpCalculator()
+
+    result = ForecastEnergyCalculator(calculator).calculate(
+        [{"datetime": "2026-01-01T01:00:00+00:00", "temperature": 11.0}],
+        starting_hour=6,
+        hours_ahead=1,
+        current_temperature=10.0,
+        now=datetime(2026, 1, 1, 6, 45, tzinfo=kolkata),
+    )
+
+    first_hour = result.as_response()["hours"][0]
+    assert first_hour["datetime"] == "2026-01-01T06:30:00+05:30"
+    assert first_hour["temperature_delta"] == 1.0
+    assert calculator.trend_adjustments == [(1.0, 11.0)]
+
+
+@pytest.mark.parametrize(
+    ("now_utc", "expected_offset"),
+    [
+        (datetime(2026, 10, 25, 0, 30, tzinfo=timezone.utc), "+02:00"),
+        (datetime(2026, 10, 25, 1, 30, tzinfo=timezone.utc), "+01:00"),
+    ],
+)
+def test_forecast_energy_selects_active_repeated_dst_hour(
+    now_utc: datetime, expected_offset: str
+) -> None:
+    """Distinguish both occurrences of a repeated local hour by their instant."""
+    warsaw = ZoneInfo("Europe/Warsaw")
+    forecast = [
+        {"datetime": "2026-10-25T01:00:00+00:00", "temperature": 12.0},
+        {"datetime": "2026-10-25T00:00:00+00:00", "temperature": 11.0},
+    ]
+
+    result = ForecastEnergyCalculator(FakeHeatPumpCalculator()).calculate(
+        forecast,
+        starting_hour=2,
+        hours_ahead=1,
+        current_temperature=10.0,
+        now=now_utc.astimezone(warsaw),
+    )
+
+    selected = result.as_response()["hours"][0]["datetime"]
+    assert selected.endswith(expected_offset)
+
+
+def test_forecast_energy_skips_nonexistent_spring_forward_hour() -> None:
+    """Select the next real occurrence when today's requested wall hour does not exist."""
+    warsaw = ZoneInfo("Europe/Warsaw")
+    forecast = [
+        {"datetime": "2026-03-29T01:00:00+00:00", "temperature": 10.0},
+        {"datetime": "2026-03-29T23:00:00+00:00", "temperature": 11.0},
+        {"datetime": "2026-03-30T00:00:00+00:00", "temperature": 12.0},
+    ]
+
+    result = ForecastEnergyCalculator(FakeHeatPumpCalculator()).calculate(
+        forecast,
+        starting_hour=2,
+        hours_ahead=1,
+        current_temperature=9.0,
+        now=datetime(2026, 3, 29, 0, 30, tzinfo=timezone.utc).astimezone(warsaw),
+    )
+
+    assert result.as_response()["hours"][0]["datetime"] == "2026-03-30T02:00:00+02:00"
 
 
 def test_forecast_energy_serializes_sorted_window_with_current_temperature_seed() -> None:

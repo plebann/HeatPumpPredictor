@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 
@@ -158,7 +158,7 @@ class ForecastEnergyCalculator:
             if dt_val is None:
                 continue
             parsed_forecast.append((self._as_local(dt_val, now), item))
-        parsed_forecast.sort(key=lambda pair: pair[0])
+        parsed_forecast.sort(key=lambda pair: self._timeline_value(pair[0]))
         return parsed_forecast
 
     def _find_start_index(
@@ -167,8 +167,13 @@ class ForecastEnergyCalculator:
         now: datetime,
         starting_hour: int,
     ) -> int:
+        current_hour_start = now.replace(minute=0, second=0, microsecond=0)
+        current_hour_instant = self._timeline_value(current_hour_start)
         for idx, (dt_val, _) in enumerate(parsed_forecast):
-            if dt_val >= now and dt_val.hour == starting_hour:
+            if (
+                self._timeline_value(dt_val) >= current_hour_instant
+                and dt_val.hour == starting_hour
+            ):
                 return idx
         raise ForecastEnergyCalculationError("forecast_window_too_small")
 
@@ -180,9 +185,15 @@ class ForecastEnergyCalculator:
         current_temperature: float | None,
     ) -> float | None:
         window_start_dt = parsed_forecast[start_index][0]
-        next_hour_start = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        current_hour_start = now.replace(minute=0, second=0, microsecond=0)
+        next_hour_start = current_hour_start + timedelta(hours=1)
+        window_hour_start = window_start_dt.replace(minute=0, second=0, microsecond=0)
+        window_hour_instant = self._timeline_value(window_hour_start)
 
-        if window_start_dt == next_hour_start:
+        if window_hour_instant in {
+            self._timeline_value(current_hour_start),
+            self._timeline_value(next_hour_start),
+        }:
             return current_temperature
 
         if start_index == 0:
@@ -224,3 +235,10 @@ class ForecastEnergyCalculator:
         if now.tzinfo is None:
             return dt_val.replace(tzinfo=None)
         return dt_val.astimezone(now.tzinfo)
+
+    @staticmethod
+    def _timeline_value(dt_val: datetime) -> datetime:
+        """Return a comparable value that distinguishes repeated local times."""
+        if dt_val.tzinfo is None or dt_val.utcoffset() is None:
+            return dt_val
+        return dt_val.astimezone(timezone.utc).replace(tzinfo=None)
