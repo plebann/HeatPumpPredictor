@@ -43,9 +43,9 @@ Make `starting_hour` select the complete local hourly Forecast Window that is cu
 
 ### Phase 1: Correct the Forecast Window contract
 
-- [ ] 1.1 Add calculator regression tests covering current-hour boundaries, current-temperature seeding and fallback, timezone conversion, and both DST transitions.
-- [ ] 1.2 Implement instant-safe current-hour selection and Trend Adjustment seeding without changing later-window behavior or response fields.
+- [x] 1.1 Add calculator regression tests covering current-hour boundaries, current-temperature seeding and fallback, timezone conversion, and both DST transitions. — 49e5656
+- [x] 1.2 Implement instant-safe current-hour selection and Trend Adjustment seeding without changing later-window behavior or response fields. — e4a66b9
 
 ### Phase 2: Document and verify the intentional behavior change
 
-- [ ] 2.1 Update service and Forecast Window documentation to define `starting_hour` as a complete local hourly bucket and record the superseded future-only rule.
+- [x] 2.1 Update service and Forecast Window documentation to define `starting_hour` as a complete local hourly bucket and record the superseded future-only rule. — 5e09261
