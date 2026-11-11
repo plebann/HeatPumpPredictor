@@ -39,6 +39,8 @@ Make `starting_hour` select the complete local hourly Forecast Window that is cu
 
 ## Progress
 
+PR: #11
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: Correct the Forecast Window contract
