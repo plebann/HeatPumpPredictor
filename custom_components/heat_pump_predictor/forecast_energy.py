@@ -187,9 +187,10 @@ class ForecastEnergyCalculator:
         window_start_dt = parsed_forecast[start_index][0]
         current_hour_start = now.replace(minute=0, second=0, microsecond=0)
         next_hour_start = current_hour_start + timedelta(hours=1)
-        window_start_instant = self._timeline_value(window_start_dt)
+        window_hour_start = window_start_dt.replace(minute=0, second=0, microsecond=0)
+        window_hour_instant = self._timeline_value(window_hour_start)
 
-        if window_start_instant in {
+        if window_hour_instant in {
             self._timeline_value(current_hour_start),
             self._timeline_value(next_hour_start),
         }:

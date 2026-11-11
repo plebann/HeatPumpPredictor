@@ -130,6 +130,25 @@ def test_forecast_energy_matches_current_hour_after_timezone_conversion() -> Non
     assert result.as_response()["hours"][0]["datetime"] == "2026-01-01T06:00:00+01:00"
 
 
+def test_forecast_energy_seeds_current_bucket_at_fractional_utc_offset() -> None:
+    """Recognize a UTC-aligned forecast within a fractional-offset local bucket."""
+    kolkata = ZoneInfo("Asia/Kolkata")
+    calculator = FakeHeatPumpCalculator()
+
+    result = ForecastEnergyCalculator(calculator).calculate(
+        [{"datetime": "2026-01-01T01:00:00+00:00", "temperature": 11.0}],
+        starting_hour=6,
+        hours_ahead=1,
+        current_temperature=10.0,
+        now=datetime(2026, 1, 1, 6, 45, tzinfo=kolkata),
+    )
+
+    first_hour = result.as_response()["hours"][0]
+    assert first_hour["datetime"] == "2026-01-01T06:30:00+05:30"
+    assert first_hour["temperature_delta"] == 1.0
+    assert calculator.trend_adjustments == [(1.0, 11.0)]
+
+
 @pytest.mark.parametrize(
     ("now_utc", "expected_offset"),
     [
