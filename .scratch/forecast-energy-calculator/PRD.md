@@ -41,7 +41,7 @@ Domain forecast errors are represented by a single forecast calculation exceptio
 15. As a Home Assistant user, I want `hours_requested` to keep echoing the requested window length, so that consumers can detect incomplete results.
 16. As a Home Assistant user, I want `hours_returned` to keep reporting the number of forecast hours included, so that consumers can inspect the result shape.
 17. As a Home Assistant user, I want `starting_hour` to keep echoing the requested local start hour, so that service responses remain self-describing.
-18. As a Home Assistant user, I want the first future forecast entry matching `starting_hour` to remain the `Forecast Window` start, so that existing service behavior is preserved.
+18. As a Home Assistant user, I want `starting_hour` to identify a complete local hourly bucket, so that automation delays within that hour do not shift the `Forecast Window` to the next day.
 19. As a Home Assistant user, I want forecast entries to be sorted by datetime before selecting the `Forecast Window`, so that unordered weather provider output does not break predictions.
 20. As a Home Assistant user, I want invalid forecast entries without parseable datetimes to be ignored as they are today, so that malformed non-window entries do not fail the whole forecast.
 21. As a Home Assistant user, I want the forecast calculation to report the existing too-small-window error when no future start hour is available, so that I get a clear validation failure.
@@ -90,10 +90,10 @@ Domain forecast errors are represented by a single forecast calculation exceptio
 - The serialized top-level response must keep `total_energy_kwh`, `hours`, `hours_requested`, `hours_returned`, `approximated_hours`, and `starting_hour`.
 - The serialized hour entries must keep `datetime`, `temperature`, `temperature_delta`, `trend_adjustment`, `energy_kwh`, `confidence`, `approximated`, and `approximation_source`.
 - Existing rounding must be preserved: top-level `total_energy_kwh` and per-hour `energy_kwh` remain rounded as they are today.
-- The `Forecast Window` start remains the first future forecast entry whose local hour equals the requested `starting_hour`.
+- The `Forecast Window` starts at the current local hourly bucket when its hour equals `starting_hour`, including calls made after the bucket's start. Once that bucket ends, selection continues with the next forecast entry whose local hour equals `starting_hour`.
 - Forecast entries with unparseable datetimes continue to be ignored before window selection.
 - Forecast entries are sorted by local datetime before window selection.
-- If the `Forecast Window` starts at the next local hour, the first hour's previous temperature is the optional current outdoor temperature supplied by the caller.
+- If the `Forecast Window` starts at the current or next local hour, the first hour's previous temperature is the optional current outdoor temperature supplied by the caller. When it is unavailable, the first hour has no Trend Adjustment.
 - If the `Forecast Window` starts later than the next local hour, the first hour's previous temperature is taken from the forecast entry immediately before the window.
 - If a later forecast window has no previous forecast entry, the module raises a forecast calculation error with the reason that maps to the existing too-small-window translation key.
 - Missing forecast temperatures and unparseable forecast temperatures produce a forecast calculation error with the reason that maps to the existing missing-hour translation key and includes the affected datetime placeholder.
@@ -113,12 +113,13 @@ Domain forecast errors are represented by a single forecast calculation exceptio
 - The fake heat pump calculator should be intentionally small: enough to record requested temperatures, return known estimation dictionaries, return known trend multipliers, and raise an approximation error when needed.
 - Use explicit `now` values in tests. Do not patch global time or depend on wall-clock time.
 - Test unordered hourly forecast input to prove forecast entries are sorted before `Forecast Window` selection.
-- Test selection of the first future start hour matching `starting_hour`.
+- Test current-bucket selection throughout the requested hour and selection of the next matching hour after that bucket ends.
 - Test too-small-window behavior when no start hour exists.
 - Test too-small-window behavior when the requested `hours_ahead` exceeds available entries.
 - Test missing temperature behavior with the datetime placeholder preserved.
 - Test unparseable temperature behavior with the datetime placeholder preserved.
-- Test current-temperature seeding when the window starts at the next hour.
+- Test current-temperature seeding when the window starts at the current or next hour, including the unavailable-temperature fallback.
+- Test local timezone conversion and both repeated and nonexistent DST hours.
 - Test previous-forecast-hour seeding when the window starts later.
 - Test `temperature_delta` and `trend_adjustment` values in serialized hour entries.
 - Test total energy calculation after trend adjustment.

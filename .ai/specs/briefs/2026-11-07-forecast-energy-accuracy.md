@@ -65,7 +65,7 @@ Odrzucone alternatywy: liczenie także wywołań z `Scheduled Forecast`; osobny 
 - Korekta prognoz ani parametrów algorytmu na podstawie accuracy (to osobna funkcja, jak etap korekty walidacji temperatur).
 - Zmiana kontraktu serwisu `calculate_forecast_energy` (pola, wartości i kształt odpowiedzi; zgodnie z `BACKWARD_COMPATIBILITY.md` zmiany tylko addytywne).
 - Naprawa rozbieżności `entry.data` vs `options` dla sensora energii, o ile nie jest potrzebna do poprawnego odczytu w walidacji.
-- Zmiana zachowania wyboru okna, gdy `starting_hour == now.hour` (okno wypada jutro).
+- Zmiana zachowania wyboru okna, gdy `starting_hour == now.hour`, pozostawała poza zakresem tej funkcji; późniejsza poprawka może zmienić wybór bez zmiany zasady, że walidacja używa godzin zwróconych przez kalkulator.
 - Oceny wywołań z nakładającymi się oknami poza regułą "jedno okno, najstarszy wygrywa".
 
 ## Affected areas (if known)

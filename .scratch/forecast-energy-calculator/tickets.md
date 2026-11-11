@@ -14,7 +14,7 @@ Work the **frontier**: any ticket whose blockers are all done. For this linear c
 
 - [ ] `ForecastEnergyCalculator` accepts cached `Hourly Forecast`, `starting_hour`, `hours_ahead`, optional current `Outdoor Temperature`, and explicit `now`.
 - [ ] The module receives the existing heat pump calculator as a constructor dependency.
-- [ ] The happy path selects the first future `Forecast Window` matching `starting_hour`.
+- [ ] The happy path selects the current complete hourly bucket when it matches `starting_hour`, otherwise the next matching `Forecast Window`.
 - [ ] Forecast entries are sorted by datetime before selecting the `Forecast Window`.
 - [ ] The result serializes to the existing response dictionary fields.
 - [ ] Top-level and hourly energy rounding match current behavior.
