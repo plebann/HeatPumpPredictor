@@ -85,6 +85,53 @@ def test_recording_uses_last_hour_as_exclusive_window_end() -> None:
     assert observation["predicted_kwh"] == 1.23456
 
 
+def _record_manager() -> ForecastValidationManager:
+    store = Mock()
+    store.async_delay_save = Mock()
+    with patch(
+        "custom_components.heat_pump_predictor.forecast_validation.Store",
+        return_value=store,
+    ):
+        return ForecastValidationManager(
+            Mock(), "entry", energy_entity="sensor.heat_pump_energy"
+        )
+
+
+def _result(first: datetime, hours: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        total_energy_kwh=1.0,
+        hours=[
+            SimpleNamespace(datetime=first + timedelta(hours=index))
+            for index in range(hours)
+        ],
+    )
+
+
+def test_horizon_bucket_is_lead_time_to_window_start_not_window_end() -> None:
+    manager = _record_manager()
+    first = datetime(2026, 1, 1, 10, tzinfo=UTC)
+
+    # Starts in 2h but ends in 10h: lead time is 2h, not 10h.
+    manager.async_record_energy_forecast(first - timedelta(hours=2), _result(first, 8))
+
+    observation = next(iter(manager.data["energy_observations"].values()))
+    assert observation["horizon_hours"] == 2
+    assert observation["horizon_bucket"] == "0_3h"
+
+
+def test_window_starting_in_current_hour_is_recorded_in_first_bucket() -> None:
+    manager = _record_manager()
+    first = datetime(2026, 1, 1, 10, tzinfo=UTC)
+
+    manager.async_record_energy_forecast(
+        first + timedelta(minutes=25), _result(first, 3)
+    )
+
+    observation = next(iter(manager.data["energy_observations"].values()))
+    assert observation["horizon_hours"] == 0
+    assert observation["horizon_bucket"] == "0_3h"
+
+
 def test_recording_skips_nonconsecutive_forecast_hours() -> None:
     store = Mock()
     store.async_delay_save = Mock()

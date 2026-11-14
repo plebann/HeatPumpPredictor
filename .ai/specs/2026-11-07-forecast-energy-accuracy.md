@@ -74,7 +74,7 @@ EnergyObservation
   window_end: ISO datetime
   selected_hours: ordered list of ISO datetimes
   predicted_kwh: finite non-negative number
-  horizon_hours: ceil((window_end - called_at) / 1 hour)
+  horizon_hours: ceil(max(window_start - called_at, 0) / 1 hour)  # lead time to the first forecast hour
   horizon_bucket: <=3h | 4_6h | 7_12h | 13_24h | >24h
   status: pending | validated | skipped
   actual_kwh: number | null
