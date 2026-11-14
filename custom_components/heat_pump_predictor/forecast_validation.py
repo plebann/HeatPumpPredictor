@@ -103,12 +103,10 @@ def horizon_range(horizon: timedelta | float) -> str | None:
     return "24_48h"
 
 
-def energy_horizon_bucket(horizon: timedelta | float) -> str | None:
-    """Return the energy horizon bucket after rounding up to whole hours."""
+def energy_horizon_bucket(horizon: timedelta | float) -> str:
+    """Return the energy horizon bucket after rounding up to whole hours (<= 0 is the first bucket)."""
     hours = horizon.total_seconds() / 3600 if isinstance(horizon, timedelta) else float(horizon)
     rounded = math.ceil(hours)
-    if rounded <= 0:
-        return None
     if rounded <= 3:
         return "0_3h"
     if rounded <= 6:
@@ -617,10 +615,9 @@ class ForecastValidationManager:
         window_start = timestamps[0]
         window_end = timestamps[-1] + timedelta(hours=1)
         called_at = as_utc(called_at)
-        horizon = window_end - called_at
+        # Lead time to the first forecast hour; a window already under way has none.
+        horizon = max(window_start - called_at, timedelta(0))
         bucket = energy_horizon_bucket(horizon)
-        if bucket is None:
-            return
         key = "|".join((self._energy_entity, window_start.isoformat(), window_end.isoformat()))
         observations = self._data.setdefault("energy_observations", {})
         candidate = {
